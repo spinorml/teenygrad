@@ -1,0 +1,10 @@
+[package]
+name = "teenygrad"
+description = "Neural network training and inference."
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+ndarray = "0.15.6"
+error-chain = "0.12.4"
