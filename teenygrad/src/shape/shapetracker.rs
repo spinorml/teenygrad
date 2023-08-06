@@ -21,7 +21,9 @@
  */
 
 use itertools::izip;
-use std::iter::zip;
+use std::{iter::zip, ops::Mul, vec};
+
+use super::symbolic::Node;
 
 pub enum MovementOps {
     Reshape,
@@ -75,6 +77,120 @@ pub fn is_contiguous(shape: &[isize], strides: &[isize]) -> bool {
     izip!(shape, strides, &strides_for_shape(shape)).all(|(s, s1, s2)| *s1 == *s2 || *s == 1)
 }
 
+pub fn filter_strides(shape: &[isize], strides: &[isize]) -> Vec<isize> {
+    debug_assert!(shape.len() == strides.len());
+
+    izip!(strides, shape)
+        .map(|(s, shp)| if *shp != 1 { *s } else { 0 })
+        .collect()
+}
+
+// class ViewInternal(NamedTuple):
+//   shape:Tuple[int, ...]
+//   strides:Tuple[int, ...]
+//   offset:int
+//   mask:Optional[Tuple[Tuple[int, int]]]
+//   contiguous:bool
+//   shape_strides:Tuple[Tuple[int, int], ...]
+
+pub struct View {
+    shape: Vec<isize>,
+    strides: Vec<isize>,
+    offset: isize,
+    mask: Option<Vec<(isize, isize)>>,
+    contiguous: bool,
+    shape_strides: Vec<(isize, isize)>,
+}
+
+impl View {
+    pub fn new(
+        shape: &[isize],
+        strides: Option<&[isize]>,
+        offset: isize,
+        mask: Option<&[(isize, isize)]>,
+    ) -> Self {
+        let strides_from_shape = strides_for_shape(shape);
+        let filtered_strides = match strides {
+            Some(s) => filter_strides(shape, s),
+            None => strides_from_shape,
+        };
+        let contiguous = offset == 0 && mask.is_none() && is_contiguous(shape, &filtered_strides);
+        let shape_strides = to_shape_strides(shape, &filtered_strides);
+        let mask: Option<Vec<(isize, isize)>> = mask.map(|mask| mask.into());
+
+        View {
+            shape: shape.into(),
+            strides: filtered_strides,
+            offset,
+            mask,
+            contiguous,
+            shape_strides,
+        }
+    }
+
+    pub fn expr_node_mask(&self, idx: isize, valid: Option<Node>) -> Node {
+        let mut expr = match valid {
+            Some(v) => vec![v],
+            None => Vec::new(),
+        };
+
+        if let Some(mask) = &self.mask {
+            let mut acc = 1;
+            for (ns, (x, y)) in self.shape.iter().zip(mask.iter()).rev() {
+                let base = (idx / acc) % ns;
+                expr.push(Node::new_num(base).ge(*x));
+                expr.push(Node::new_num(base).lt(*y));
+                acc *= ns;
+            }
+        }
+
+        Node::new_ands(expr.as_ref())
+    }
+
+    pub fn expr_node(&self, idx: Option<Node>) -> Node {
+        let idx = match idx {
+            None => Node::new_var("idx", 0, self.shape.iter().product::<isize>() - 1),
+            Some(idx) => idx,
+        };
+        let mut result = if self.offset != 0 {
+            vec![Node::new_num(self.offset)]
+        } else {
+            vec![]
+        };
+        let mut acc: isize = 1;
+        for (d, s) in self.shape_strides.iter().rev() {
+            result.push(idx.clone().floordiv(acc, None).modulus(*d).mul(*s));
+            acc *= d;
+        }
+
+        Node::new_sum(result.as_ref())
+    }
+
+    pub fn expr_idxs(&self, idxs: &[Node]) -> Node {
+        debug_assert!(idxs.len() == self.shape.len());
+
+        let mut result = vec![Node::new_num(self.offset)];
+
+        for (idx, (sh, st)) in idxs.iter().zip(self.shape.iter().zip(self.strides.iter())) {
+            if *sh != 1 && *st != 0 {
+                result.push(idx.clone().mul(*st));
+            }
+        }
+
+        Node::new_sum(result.as_ref())
+    }
+}
+
+// @functools.lru_cache(maxsize=None)
+// def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
+//   assert len(idxs) == len(shape), "need an idx for all dimensions"
+//   acc = 1
+//   ret = []
+//   for tidx,d in reversed(list(zip(idxs, shape))):
+//     ret.append(tidx * acc)
+//     acc *= d
+//   return Variable.sum(ret)
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +227,15 @@ mod tests {
         assert!(is_contiguous(&[2, 3, 4, 5], &[24, 12, 4, 1]));
         assert!(!is_contiguous(&[2, 3, 4, 5], &[24, 12, 4, 2]));
         assert!(!is_contiguous(&[2, 3, 4, 5], &[24, 12, 4, 0]));
+    }
+
+    #[test]
+    fn test_filter_strides() {
+        assert_eq!(filter_strides(&[1, 1, 1], &[0, 0, 0]), vec![0, 0, 0]);
+        assert_eq!(filter_strides(&[2, 3, 4], &[6, 3, 1]), vec![6, 3, 1]);
+        assert_eq!(
+            filter_strides(&[2, 3, 4, 5], &[24, 12, 4, 1]),
+            vec![24, 12, 4, 1]
+        );
     }
 }
