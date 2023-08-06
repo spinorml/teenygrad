@@ -20,4 +20,5 @@
  * SOFTWARE.
  */
 
+pub mod shapetracker;
 pub mod symbolic;
