@@ -21,7 +21,7 @@
  */
 
 use itertools::izip;
-use std::{ops::Mul, vec};
+use std::{collections::VecDeque, ops::Mul, vec};
 
 use super::symbolic::Node;
 
@@ -231,6 +231,60 @@ pub fn merge_views(vm2: &View, vm1: &View) -> Option<View> {
 //   if (merged_view := merge_views(view, new_view)) is not None: return merged_view, False
 //   if DEBUG >= 4: print(f"WARNING: creating new view with reshape {view} -> {new_shape}")
 //   return new_view, True
+
+fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
+    //   shape, mask, strides, offset = view.shape, view.mask, view.strides, view.offset
+    let (shape, mask, strides, offset) = (view.shape, view.mask, view.strides, view.offset);
+
+    //   if [x for x in shape if x != 1] == [x for x in new_shape if x != 1]:
+    //     new_strides: List[int] = [y for x,y in zip(shape, strides) if x != 1]
+    //     new_strides_tuple: Tuple[int, ...] = tuple([0 if x == 1 else new_strides.pop(0) for x in new_shape])
+    //     new_mask_tuple = None
+    //     if mask:
+    //       for x,y in zip(shape, mask):
+    //         if x == 1 and y != (0, 1):
+    //           new_mask_tuple = ((0,0),) * len(new_shape)
+    //           break
+    //       else:
+    //         new_mask: List[Tuple[int, int]] = [y for x,y in zip(shape, mask) if x != 1]
+    //         new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
+
+    let lhs: Vec<isize> = shape.iter().filter(|x| **x != 1).map(|x| *x).collect();
+    let rhs: Vec<isize> = new_shape.iter().filter(|x| **x != 1).map(|x| *x).collect();
+
+    if lhs == rhs {
+        let mut new_strides: VecDeque<isize> = shape
+            .iter()
+            .zip(strides.iter())
+            .filter(|(x, _)| **x != 1)
+            .map(|(_, y)| *y)
+            .collect();
+        let new_strides_tuple: Vec<isize> = new_shape
+            .iter()
+            .map(|x| {
+                if *x == 1 {
+                    0
+                } else {
+                    new_strides.pop_front().unwrap()
+                }
+            })
+            .collect();
+        let mut new_mask_tuple = None;
+        if mask.is_some() {
+            for (x, y) in izip!(shape.iter(), mask.unwrap().iter()) {
+                if *x == 1 && *y != (0, 1) {
+                    new_mask_tuple = Some(vec![(0, 0); new_shape.len()]);
+                    break;
+                }
+            }
+        }
+        return (
+            View::new(&new_shape, Some(&new_strides_tuple), offset, new_mask_tuple),
+            false,
+        );
+    }
+    todo!()
+}
 
 // @functools.lru_cache(maxsize=None)
 // def get_pad_args(shape:Tuple[int,...], arg:Tuple[Tuple[int, int], ...]):
