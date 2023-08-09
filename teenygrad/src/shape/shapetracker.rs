@@ -21,7 +21,7 @@
  */
 
 use itertools::izip;
-use std::{collections::VecDeque, ops::Mul, vec};
+use std::{cmp::Ordering, collections::VecDeque, isize, ops::Mul, vec};
 
 use super::symbolic::Node;
 
@@ -78,6 +78,7 @@ pub fn filter_strides(shape: &[isize], strides: &[isize]) -> Vec<isize> {
 //   contiguous:bool
 //   shape_strides:Tuple[Tuple[int, int], ...]
 
+#[derive(Debug, Clone)]
 pub struct View {
     shape: Vec<isize>,
     strides: Vec<isize>,
@@ -113,18 +114,18 @@ impl View {
         }
     }
 
-    pub fn expr_node_mask(&self, idx: isize, valid: Option<Node>) -> Node {
+    pub fn expr_node_mask(&self, idx: &Node, valid: Option<&Node>) -> Node {
         let mut expr = match valid {
-            Some(v) => vec![v],
+            Some(v) => vec![v.clone()],
             None => Vec::new(),
         };
 
         if let Some(mask) = &self.mask {
             let mut acc = 1;
             for (ns, (x, y)) in self.shape.iter().zip(mask.iter()).rev() {
-                let base = (idx / acc) % ns;
-                expr.push(Node::new_num(base).ge(*x));
-                expr.push(Node::new_num(base).lt(*y));
+                let base = (idx.clone().floordiv(acc, None)).modulus(*ns);
+                expr.push(base.clone().ge(*x));
+                expr.push(base.lt(*y));
                 acc *= ns;
             }
         }
@@ -132,10 +133,10 @@ impl View {
         Node::new_ands(expr.as_ref())
     }
 
-    pub fn expr_node(&self, idx: Option<Node>) -> Node {
+    pub fn expr_node(&self, idx: Option<&Node>) -> Node {
         let idx = match idx {
             None => Node::new_var("idx", 0, self.shape.iter().product::<isize>() - 1),
-            Some(idx) => idx,
+            Some(idx) => idx.clone(),
         };
         let mut result = if self.offset != 0 {
             vec![Node::new_num(self.offset)]
@@ -207,58 +208,16 @@ pub fn merge_views(vm2: &View, vm1: &View) -> Option<View> {
     todo!()
 }
 
-// @functools.lru_cache(maxsize=None)
-// def _reshape(view: View, new_shape:Tuple[int, ...]) -> Tuple[View, bool]:
-//   shape, mask, strides, offset = view.shape, view.mask, view.strides, view.offset
-//   # check if this is adding or removing 1s (only)
-//   # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
-//   if [x for x in shape if x != 1] == [x for x in new_shape if x != 1]:
-//     new_strides: List[int] = [y for x,y in zip(shape, strides) if x != 1]
-//     new_strides_tuple: Tuple[int, ...] = tuple([0 if x == 1 else new_strides.pop(0) for x in new_shape])
-//     new_mask_tuple = None
-//     if mask:
-//       for x,y in zip(shape, mask):
-//         if x == 1 and y != (0, 1):
-//           new_mask_tuple = ((0,0),) * len(new_shape)
-//           break
-//       else:
-//         new_mask: List[Tuple[int, int]] = [y for x,y in zip(shape, mask) if x != 1]
-//         new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
-//     return View(new_shape, new_strides_tuple, offset, new_mask_tuple), False
-
-//   new_view = View(new_shape)
-//   if view.contiguous: return new_view, False # NOTE: if it's contiguous it can't have an offset
-//   if (merged_view := merge_views(view, new_view)) is not None: return merged_view, False
-//   if DEBUG >= 4: print(f"WARNING: creating new view with reshape {view} -> {new_shape}")
-//   return new_view, True
-
 fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
-    //   shape, mask, strides, offset = view.shape, view.mask, view.strides, view.offset
-    let (shape, mask, strides, offset) = (view.shape, view.mask, view.strides, view.offset);
+    let filtered_shape: Vec<isize> = view.shape.iter().filter(|x| **x != 1).copied().collect();
+    let filtered_newshape: Vec<isize> = new_shape.iter().filter(|x| **x != 1).copied().collect();
 
-    //   if [x for x in shape if x != 1] == [x for x in new_shape if x != 1]:
-    //     new_strides: List[int] = [y for x,y in zip(shape, strides) if x != 1]
-    //     new_strides_tuple: Tuple[int, ...] = tuple([0 if x == 1 else new_strides.pop(0) for x in new_shape])
-    //     new_mask_tuple = None
-    //     if mask:
-    //       for x,y in zip(shape, mask):
-    //         if x == 1 and y != (0, 1):
-    //           new_mask_tuple = ((0,0),) * len(new_shape)
-    //           break
-    //       else:
-    //         new_mask: List[Tuple[int, int]] = [y for x,y in zip(shape, mask) if x != 1]
-    //         new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
-
-    let lhs: Vec<isize> = shape.iter().filter(|x| **x != 1).map(|x| *x).collect();
-    let rhs: Vec<isize> = new_shape.iter().filter(|x| **x != 1).map(|x| *x).collect();
-
-    if lhs == rhs {
-        let mut new_strides: VecDeque<isize> = shape
-            .iter()
-            .zip(strides.iter())
+    if filtered_shape == filtered_newshape {
+        let mut new_strides: VecDeque<isize> = izip!(view.shape.iter(), view.strides.iter())
             .filter(|(x, _)| **x != 1)
             .map(|(_, y)| *y)
             .collect();
+
         let new_strides_tuple: Vec<isize> = new_shape
             .iter()
             .map(|x| {
@@ -269,199 +228,430 @@ fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
                 }
             })
             .collect();
+
         let mut new_mask_tuple = None;
-        if mask.is_some() {
-            for (x, y) in izip!(shape.iter(), mask.unwrap().iter()) {
+        if let Some(ref mask1) = view.mask {
+            for (x, y) in izip!(view.shape.iter(), mask1.iter()) {
                 if *x == 1 && *y != (0, 1) {
                     new_mask_tuple = Some(vec![(0, 0); new_shape.len()]);
                     break;
+                } else {
+                    let mut new_mask: Vec<(isize, isize)> =
+                        izip!(view.shape.iter(), view.mask.as_ref().unwrap().iter())
+                            .filter(|(x, _)| **x != 1)
+                            .map(|(_, y)| *y)
+                            .rev()
+                            .collect();
+
+                    new_mask_tuple = Some(
+                        new_shape
+                            .iter()
+                            .map(|x| {
+                                if *x == 1 {
+                                    (0, 1)
+                                } else {
+                                    new_mask.pop().unwrap()
+                                }
+                            })
+                            .collect(),
+                    );
                 }
             }
         }
+
+        let new_mask_tuple: Option<&[(isize, isize)]> = match new_mask_tuple {
+            Some(ref x) => Some(x.as_slice()),
+            None => None,
+        };
+
         return (
-            View::new(&new_shape, Some(&new_strides_tuple), offset, new_mask_tuple),
+            View::new(
+                new_shape,
+                Some(new_strides_tuple.as_slice()),
+                view.offset,
+                new_mask_tuple,
+            ),
             false,
         );
     }
-    todo!()
+
+    let new_view = View::new(new_shape, None, 0, None);
+    if new_view.contiguous {
+        return (new_view, false);
+    }
+
+    let merged_view = merge_views(view, &new_view);
+    if let Some(view) = merged_view {
+        return (view, false);
+    }
+
+    log::debug!(
+        "WARNING: creating new view with reshape {:?} -> {:?}",
+        new_view,
+        new_shape
+    );
+
+    (new_view, true)
 }
 
-// @functools.lru_cache(maxsize=None)
-// def get_pad_args(shape:Tuple[int,...], arg:Tuple[Tuple[int, int], ...]):
-//   return tuple([(-b,s+e) for s,(b,e) in zip(shape, arg)]), tuple([(b,s+b) for s,(b,_) in zip(shape, arg)])
+pub struct PadArgs {
+    pub zvarg: Vec<(isize, isize)>,
+    pub mask: Vec<(isize, isize)>,
+}
 
-// @functools.lru_cache(maxsize=None)
-// def get_unsafe_resize_offset(strides, arg):
-//   return sum([s * x[0] for s, x in zip(strides,arg)])
+pub fn get_pad_args(shape: &[isize], arg: &[(isize, isize)]) -> PadArgs {
+    let mut zvarg: Vec<(isize, isize)> = Vec::with_capacity(shape.len());
+    let mut mask: Vec<(isize, isize)> = Vec::with_capacity(shape.len());
 
-// class ShapeTracker:
-//   __slots__ = "views"
-//   def __init__(self, shape:Union[ShapeTracker, Tuple[int, ...]], views:Optional[List[View]]=None):
-//     self.views: List[View] = views if views is not None else ([*cast(ShapeTracker, shape).views] if shape.__class__ is ShapeTracker else [View(shape)])
-//   def __repr__(self): return f"ShapeTracker(shape={self.views[-1].shape}, views={self.views})"
-//   def copy(self) -> ShapeTracker: return ShapeTracker(self.views[-1].shape, [*self.views])
+    for (s, (b, e)) in izip!(shape.iter(), arg.iter()) {
+        zvarg.push((-b, s + e));
+        mask.push((*b, s + b));
+    }
 
-//   @property
-//   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
+    PadArgs { zvarg, mask }
+}
 
-//   @property
-//   def shape(self) -> Tuple[int, ...]: return self.views[-1].shape
+pub fn get_unsafe_resize_offset(strides: &[isize], arg: &[(isize, isize)]) -> isize {
+    izip!(strides, arg).map(|(s, x)| s * x.0).sum()
+}
 
-//   @property
-//   def key(self) -> Tuple[View, ...]: return tuple(self.views)
+#[derive(Debug, Clone)]
+pub struct ShapeTracker {
+    views: Vec<View>,
+}
 
-//   # this is the real size (ish)
-//   def size(self): return prod([s for s,st in zip(self.views[-1].shape, self.views[-1].strides) if st != 0])
+impl ShapeTracker {
+    pub fn with_shape(shape: &[isize]) -> Self {
+        ShapeTracker {
+            views: vec![View::new(shape, None, 0, None)],
+        }
+    }
 
-//   # these are multiview strides, value is None if it's not a simple strided dimension
-//   # TODO: this can be shared code between simplify and merge_views
-//   def real_offset(self) -> int:
-//     real_offset, mask = self.expr_node(Variable('zero', 0, 0))
-//     assert real_offset.__class__ is NumNode, f"how is the offset not a number? {real_offset} {mask}"
-//     return real_offset.b
+    pub fn with_views(views: &[View]) -> Self {
+        ShapeTracker {
+            views: views.to_vec(),
+        }
+    }
 
-//   # NOTE: if a stride is not always valid, it will be None
-//   def real_strides(self, ignore_valid=False) -> Tuple[Optional[Union[Node, int]], ...]:
-//     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
-//     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-//     idx, valid = self.expr_idxs(idxs)
-//     ret: List[Optional[Union[Node, int]]] = [None] * len(self.views[-1].shape)
-//     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
-//       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
-//         ret[idxs.index(this_dim.a)] = this_dim.b
-//       elif isinstance(this_dim, Variable):
-//         ret[idxs.index(this_dim)] = 1
-//     idx_vars, valid_vars = idx.vars(), valid.vars()
-//     for i,tidx in enumerate(idxs):
-//       if tidx in valid_vars and not ignore_valid: ret[i] = None
-//       elif tidx not in idx_vars: ret[i] = 0
-//     return tuple(ret)
-//   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
+    pub fn contiguous(&self) -> bool {
+        self.views.len() == 1 && self.views[0].contiguous
+    }
 
-//   def _expr_idx(self, idx, valid):
-//     for v in reversed(self.views[0:-1]):
-//       valid = v.expr_node_mask(idx, valid)
-//       idx = v.expr_node(idx)
-//     return idx, valid
+    pub fn shape(&self) -> Vec<isize> {
+        self.views.last().unwrap().shape.clone()
+    }
 
-//   def simplify(self):
-//     if len(self.views) >= 2:
-//       new_view = merge_views(self.views[-2], self.views[-1])
-//       if new_view:
-//         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
-//         self.views = self.views[:-2] + [new_view]
-//         self.simplify()
+    pub fn size(&self) -> isize {
+        izip!(
+            self.views.last().unwrap().shape.iter(),
+            self.views.last().unwrap().strides.iter()
+        )
+        .filter(|(_, st)| **st != 0)
+        .map(|(s, _)| *s)
+        .product()
+    }
 
-//   def expr_idxs(self, idxs=None):
-//     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-//     idx = self.views[-1].expr_idxs(tuple(idxs))
-//     valid = self.views[-1].expr_node_mask(idxs_to_idx(self.views[-1].shape, tuple(idxs)))
-//     return self._expr_idx(idx, valid)
+    //   # these are multiview strides, value is None if it's not a simple strided dimension
+    //   # TODO: this can be shared code between simplify and merge_views
+    //   def real_offset(self) -> int:
+    //     real_offset, mask = self.expr_node(Variable('zero', 0, 0))
+    //     assert real_offset.__class__ is NumNode, f"how is the offset not a number? {real_offset} {mask}"
+    //     return real_offset.b
 
-//   def expr_node(self, idx='idx'):
-//     if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
-//     return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
+    pub fn real_offset(&self) -> isize {
+        let (real_offset, mask) = self.expr_node(&Node::new_var("zero", 0, 0));
+        match real_offset {
+            Node::Num { attrs } => attrs.b,
+            _ => panic!(
+                "how is the offset not a number? {:?} {:?}",
+                real_offset, mask
+            ),
+        }
+    }
 
-//   def needs_valid(self) -> bool:
-//     return any(v.mask is not None for v in self.views)
+    //   # NOTE: if a stride is not always valid, it will be None
+    //   def real_strides(self, ignore_valid=False) -> Tuple[Optional[Union[Node, int]], ...]:
+    //     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
+    //     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
+    //     idx, valid = self.expr_idxs(idxs)
+    //     ret: List[Optional[Union[Node, int]]] = [None] * len(self.views[-1].shape)
+    //     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
+    //       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
+    //         ret[idxs.index(this_dim.a)] = this_dim.b
+    //       elif isinstance(this_dim, Variable):
+    //         ret[idxs.index(this_dim)] = 1
+    //     idx_vars, valid_vars = idx.vars(), valid.vars()
+    //     for i,tidx in enumerate(idxs):
+    //       if tidx in valid_vars and not ignore_valid: ret[i] = None
+    //       elif tidx not in idx_vars: ret[i] = 0
+    //     return tuple(ret)
+    pub fn real_strides(&self, ignore_valid: bool) -> Vec<Option<Node>> {
+        //     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
+        if self.views.len() == 1 && self.views.last().unwrap().mask.is_none() {
+            return self
+                .views
+                .last()
+                .unwrap()
+                .strides
+                .iter()
+                .map(|x| Some(Node::new_num(*x)))
+                .collect();
+        }
 
-//   # *** under this line are the movement ops ***
+        let idxs = (0..self.shape().len())
+            .map(|i| Node::new_var(&format!("idx{}", i), 0, self.shape()[i] - 1))
+            .collect::<Vec<Node>>();
+        let (idx, valid) = self.expr_idxs(&idxs);
+        let mut ret: Vec<Option<Node>> = vec![None; self.views.last().unwrap().shape.len()];
+        let nodes = match idx {
+            Node::Sum { nodes, .. } => nodes,
+            _ => vec![idx],
+        };
 
-//   def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
-//     offset = get_unsafe_resize_offset(self.views[-1].strides, arg)
-//     if self.views[-1].mask:
-//       # move the old mask
-//       nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.views[-1].mask, arg)])
-//       # merge the masks if we have two
-//       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
-//     self.views[-1] = View(tuple([y-x for x,y in arg]), self.views[-1].strides, self.views[-1].offset+offset, mask)
+        for this_dim in nodes {
+            //       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
+            //         ret[idxs.index(this_dim.a)] = this_dim.b
+            //       elif isinstance(this_dim, Variable):
+            //         ret[idxs.index(this_dim)] = 1
+        }
 
-//   def pad(self, arg: Tuple[Tuple[int, int], ...]):
-//     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
-//     if any(b or e for b, e in arg):
-//       zvarg, mask = get_pad_args(self.shape, arg)
-//       self.__unsafe_resize(zvarg, mask=mask)
-//     return self
+        // let (idx_vars, valid_vars) = (idx.vars(), valid.vars());
+        for (i, tidx) in idxs.iter().enumerate() {
+            //       if tidx in valid_vars and not ignore_valid: ret[i] = None
+            //       elif tidx not in idx_vars: ret[i] = 0
+        }
 
-//   def shrink(self, arg: Tuple[Tuple[int, int], ...]):
-//     assert all((b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape)
-//     self.__unsafe_resize(arg)
-//     return self
+        ret
+    }
 
-//   def expand(self, new_shape: Tuple[Union[Node,int], ...]) -> ShapeTracker:
-//     assert len(new_shape) == len(self.views[-1].shape)
-//     assert all(is_sym_int(x) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
-//     # NOTE: can the mask ever be (0,0)?
-//     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
-//     self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
-//     return self
+    //   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
+    pub fn unit_stride_axes(&self, ignore_valid: bool) -> Vec<isize> {
+        todo!()
+    }
 
-//   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
-//     # reshape into symbolic shape, update the variable value
-//     if all(isinstance(s, int) for s in self.shape) and len(new_vars:=list(s for s in new_shape if isinstance(s, Variable))) > 0:
-//       assert len(new_vars) == 1, "only one variable is supported in a shape"
-//       new_var, new_val = new_vars[0], prod(self.shape) // prod(s for s in new_shape if isinstance(s, int))
-//       if new_var.val is None:
-//         assert new_var.min <= new_val <= new_var.max, f"variable value {new_val} out of range [{new_var.min}, {new_var.max}]"
-//         new_var.val = new_val
-//       else: assert new_var.val == new_val, f"value conflicts, was {new_var.val}, set to {new_val}"
+    //   def _expr_idx(self, idx, valid):
+    //     for v in reversed(self.views[0:-1]):
+    //       valid = v.expr_node_mask(idx, valid)
+    //       idx = v.expr_node(idx)
+    //     return idx, valid
+    fn _expr_idx(&self, idx: &Node, valid: &Node) -> (Node, Node) {
+        todo!()
+    }
 
-//     if self.views[-1].shape == new_shape: return self
-//     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
-//     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
-//     if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
-//       assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
-//     new_view, extra = _reshape(self.views[-1], new_shape)
-//     if extra: self.views.append(new_view)
-//     else: self.views[-1] = new_view
-//     return self
+    //   def simplify(self):
+    //     if len(self.views) >= 2:
+    //       new_view = merge_views(self.views[-2], self.views[-1])
+    //       if new_view:
+    //         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
+    //         self.views = self.views[:-2] + [new_view]
+    //         self.simplify()
+    pub fn simplify(&mut self) {
+        todo!()
+    }
 
-//   def permute(self, axis: Tuple[int, ...]):
-//     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
-//     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
-//     self.views[-1] = View(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)
-//     return self
+    //   def expr_idxs(self, idxs=None):
+    //     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
+    //     idx = self.views[-1].expr_idxs(tuple(idxs))
+    //     valid = self.views[-1].expr_node_mask(idxs_to_idx(self.views[-1].shape, tuple(idxs)))
+    //     return self._expr_idx(idx, valid)
+    pub fn expr_idxs(&self, idxs: &[Node]) -> (Node, Node) {
+        todo!()
+    }
 
-//   # except for the negative case, you can build this from the others. invertible in the negative case
-//   def stride(self, mul: Tuple[int, ...]):
-//     assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.shape}"
-//     strides = tuple([z*m for z,m in zip(self.views[-1].strides, mul)])
-//     new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(self.views[-1].shape, mul)])
-//     offset = sum([(s-1)*z for s,z,m in zip(self.views[-1].shape, self.views[-1].strides, mul) if m < 0])
-//     mask = tuple([(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.views[-1].mask, self.views[-1].shape, mul)]) if self.views[-1].mask is not None else None
-//     self.views[-1] = View(new_shape, strides, self.views[-1].offset + offset, mask)
-//     return self
+    //   def expr_node(self, idx='idx'):
+    //     if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
+    //     return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
+    pub fn expr_node(&self, idx: &Node) -> (Node, Node) {
+        self._expr_idx(
+            &self.views.last().unwrap().expr_node(Some(idx)),
+            &self.views.last().unwrap().expr_node_mask(idx, None),
+        )
+    }
 
-//   # *** entry point for external ***
+    //   def needs_valid(self) -> bool:
+    //     return any(v.mask is not None for v in self.views)
+    pub fn needs_valid(&self) -> bool {
+        todo!()
+    }
 
-//   def movement_op(self, op: MovementOps, arg:Union[Tuple[int, ...], Tuple[Tuple[int, int], ...]]) -> ShapeTracker:
-//     assert isinstance(arg, tuple) and (len(arg) == len(self.shape) or op == MovementOps.RESHAPE), f"arg {arg} for {op} doesn't match dim of shape {self.shape}"
-//     dispatch[op](self, arg)
-//     return self
+    //   def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
+    //     offset = get_unsafe_resize_offset(self.views[-1].strides, arg)
+    //     if self.views[-1].mask:
+    //       # move the old mask
+    //       nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.views[-1].mask, arg)])
+    //       # merge the masks if we have two
+    //       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
+    //     self.views[-1] = View(tuple([y-x for x,y in arg]), self.views[-1].strides, self.views[-1].offset+offset, mask)
+    fn unsafe_resize(&mut self, arg: &[(isize, isize)], mask: Option<&[(isize, isize)]>) {
+        todo!()
+    }
 
-// dispatch: Dict[MovementOps, Callable] = {MovementOps.RESHAPE: ShapeTracker.reshape, MovementOps.EXPAND: ShapeTracker.expand, MovementOps.PAD: ShapeTracker.pad,
-//                                          MovementOps.SHRINK: ShapeTracker.shrink, MovementOps.PERMUTE: ShapeTracker.permute, MovementOps.STRIDE: ShapeTracker.stride}
+    //   def pad(self, arg: Tuple[Tuple[int, int], ...]):
+    //     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
+    //     if any(b or e for b, e in arg):
+    //       zvarg, mask = get_pad_args(self.shape, arg)
+    //       self.__unsafe_resize(zvarg, mask=mask)
+    //     return self
+    pub fn pad(&mut self, arg: &[(isize, isize)]) {
+        todo!()
+    }
 
-// # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
-// def get_contraction(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Optional[List[List[int]]]:
-//   # Pre-allocate all groups.
-//   axis_groups: List[List[int]] = [[] for _ in range(len(new_shape))]
-//   # Index for new_shape and axis_groups.
-//   i: int = 0
-//   old_shape_i: int = 0
-//   while old_shape_i < len(old_shape):
-//     # 1s exist in new_shape only will lead to empty axes group creations.
-//     if new_shape[i] == 1 and old_shape[old_shape_i] != 1:
-//       if i < len(new_shape) - 1: i += 1
-//     else:
-//       axis_groups[i].append(old_shape_i)
-//       axis_group_size = prod([old_shape[x] for x in axis_groups[i]])
-//       # Move to next axes group if total size of all dimensions match.
-//       if axis_group_size == new_shape[i]:
-//         if i < len(new_shape) - 1: i += 1
-//       elif axis_group_size > new_shape[i]: return None
-//       old_shape_i += 1
-//   return axis_groups
+    //   def shrink(self, arg: Tuple[Tuple[int, int], ...]):
+    //     assert all((b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape)
+    //     self.__unsafe_resize(arg)
+    //     return self
+    pub fn shrink(&mut self, arg: &[(isize, isize)]) {
+        todo!()
+    }
+
+    //   def expand(self, new_shape: Tuple[Union[Node,int], ...]) -> ShapeTracker:
+    //     assert len(new_shape) == len(self.views[-1].shape)
+    //     assert all(is_sym_int(x) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
+    //     # NOTE: can the mask ever be (0,0)?
+    //     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
+    //     self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
+    //     return self
+    pub fn expand(&mut self, new_shape: &[isize]) {
+        todo!()
+    }
+
+    //   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
+    //     # reshape into symbolic shape, update the variable value
+    //     if all(isinstance(s, int) for s in self.shape) and len(new_vars:=list(s for s in new_shape if isinstance(s, Variable))) > 0:
+    //       assert len(new_vars) == 1, "only one variable is supported in a shape"
+    //       new_var, new_val = new_vars[0], prod(self.shape) // prod(s for s in new_shape if isinstance(s, int))
+    //       if new_var.val is None:
+    //         assert new_var.min <= new_val <= new_var.max, f"variable value {new_val} out of range [{new_var.min}, {new_var.max}]"
+    //         new_var.val = new_val
+    //       else: assert new_var.val == new_val, f"value conflicts, was {new_var.val}, set to {new_val}"
+    //     if self.views[-1].shape == new_shape: return self
+    //     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
+    //     # only check size for int shapes. we don't check symbolic here as long as the reshape itself can be done
+    //     if all(isinstance(s, int) for s in self.shape) and all(isinstance(s, int) for s in new_shape):
+    //       assert prod(self.shape) == prod(new_shape), f"can't reshape {self.shape} -> {new_shape}" # type: ignore  # mypy cannot resolve, all ints here
+    //     new_view, extra = _reshape(self.views[-1], new_shape)
+    //     if extra: self.views.append(new_view)
+    //     else: self.views[-1] = new_view
+    //     return self
+    pub fn reshape(&mut self, new_shape: &[isize]) {
+        todo!()
+    }
+
+    //   def permute(self, axis: Tuple[int, ...]):
+    //     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
+    //     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
+    //     self.views[-1] = View(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)
+    //     return self
+    pub fn permute(&mut self, axis: &[isize]) {
+        todo!()
+    }
+
+    //   # except for the negative case, you can build this from the others. invertible in the negative case
+    //   def stride(self, mul: Tuple[int, ...]):
+    //     assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.shape}"
+    //     strides = tuple([z*m for z,m in zip(self.views[-1].strides, mul)])
+    //     new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(self.views[-1].shape, mul)])
+    //     offset = sum([(s-1)*z for s,z,m in zip(self.views[-1].shape, self.views[-1].strides, mul) if m < 0])
+    //     mask = tuple(
+    //      [(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m),
+    //        ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.views[-1].mask,
+    //        self.views[-1].shape, mul)]) if self.views[-1].mask is not None else None
+    //     self.views[-1] = View(new_shape, strides, self.views[-1].offset + offset, mask)
+    //     return self
+    pub fn stride(&mut self, mul: &[isize]) {
+        let strides = izip!(self.views.last().unwrap().strides.iter(), mul)
+            .map(|(z, m)| z * m)
+            .collect::<Vec<isize>>();
+
+        let new_shape = izip!(self.views.last().unwrap().shape.iter(), mul)
+            .map(|(s, m)| (s + (m.abs() - 1)) / m.abs())
+            .collect::<Vec<isize>>();
+
+        let offset = izip!(
+            self.views.last().unwrap().shape.iter(),
+            self.views.last().unwrap().strides.iter(),
+            mul
+        )
+        .filter(|(_, _, m)| **m < 0)
+        .map(|(s, z, m)| (s - 1) * z)
+        .sum();
+
+        let mask = if let Some(mask) = &self.views.last().unwrap().mask {
+            Some(
+                izip!(mask.iter(), self.views.last().unwrap().shape.iter(), mul)
+                    .map(|((mx, my), s, m)| {
+                        (
+                            ((if *m > 0 { *mx } else { *s - *my }) + (m.abs() - 1)) / m.abs(),
+                            ((if *m > 0 { *my } else { *s - *mx }) + (m.abs() - 1)) / m.abs(),
+                        )
+                    })
+                    .collect::<Vec<(isize, isize)>>(),
+            )
+        } else {
+            None
+        };
+
+        let view = if let Some(m) = mask {
+            View::new(&new_shape, Some(&strides), offset, Some(&m))
+        } else {
+            View::new(&new_shape, Some(&strides), offset, None)
+        };
+
+        let idx = self.views.len();
+        self.views[idx - 1] = view;
+    }
+
+    pub fn movement_op(&mut self, op: MovementOps, arg: &[isize]) {
+        match op {
+            MovementOps::Reshape => self.reshape(arg),
+            MovementOps::Expand => self.expand(arg),
+            MovementOps::Permute => self.permute(arg),
+            MovementOps::Stride => self.stride(arg),
+            _ => panic!("invalid movement op"),
+        }
+    }
+
+    pub fn movement_op1(&mut self, op: MovementOps, arg: &[(isize, isize)]) {
+        match op {
+            MovementOps::Pad => self.pad(arg),
+            MovementOps::Shrink => self.shrink(arg),
+            _ => panic!("invalid movement op"),
+        }
+    }
+}
+
+pub fn get_contraction(old_shape: &[isize], new_shape: &[isize]) -> Option<Vec<Vec<usize>>> {
+    let mut axis_groups: Vec<Vec<usize>> = vec![Vec::new(); new_shape.len()];
+    let mut i = 0;
+    let mut old_shape_i = 0;
+    while old_shape_i < old_shape.len() {
+        if new_shape[i] == 1 && old_shape[old_shape_i] != 1 {
+            if i < new_shape.len() - 1 {
+                i += 1;
+            }
+        } else {
+            axis_groups[i].push(old_shape_i);
+            let axis_group_size = axis_groups[i]
+                .iter()
+                .map(|x| old_shape[*x])
+                .product::<isize>();
+
+            match axis_group_size.cmp(&new_shape[i]) {
+                Ordering::Equal => {
+                    if i < new_shape.len() - 1 {
+                        i += 1;
+                    }
+                }
+                Ordering::Greater => return None,
+                Ordering::Less => {}
+            }
+
+            old_shape_i += 1;
+        }
+    }
+
+    Some(axis_groups)
+}
 
 #[cfg(test)]
 mod tests {
