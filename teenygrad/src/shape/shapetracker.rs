@@ -21,7 +21,13 @@
  */
 
 use itertools::izip;
-use std::{cmp::Ordering, collections::VecDeque, isize, ops::Mul, vec};
+use std::{
+    cmp::{max, min, Ordering},
+    collections::VecDeque,
+    isize,
+    ops::Mul,
+    vec,
+};
 
 use super::symbolic::Node;
 
@@ -351,13 +357,6 @@ impl ShapeTracker {
         .product()
     }
 
-    //   # these are multiview strides, value is None if it's not a simple strided dimension
-    //   # TODO: this can be shared code between simplify and merge_views
-    //   def real_offset(self) -> int:
-    //     real_offset, mask = self.expr_node(Variable('zero', 0, 0))
-    //     assert real_offset.__class__ is NumNode, f"how is the offset not a number? {real_offset} {mask}"
-    //     return real_offset.b
-
     pub fn real_offset(&self) -> isize {
         let (real_offset, mask) = self.expr_node(&Node::new_var("zero", 0, 0));
         match real_offset {
@@ -386,7 +385,6 @@ impl ShapeTracker {
     //       elif tidx not in idx_vars: ret[i] = 0
     //     return tuple(ret)
     pub fn real_strides(&self, ignore_valid: bool) -> Vec<Option<Node>> {
-        //     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
         if self.views.len() == 1 && self.views.last().unwrap().mask.is_none() {
             return self
                 .views
@@ -401,8 +399,8 @@ impl ShapeTracker {
         let idxs = (0..self.shape().len())
             .map(|i| Node::new_var(&format!("idx{}", i), 0, self.shape()[i] - 1))
             .collect::<Vec<Node>>();
-        let (idx, valid) = self.expr_idxs(&idxs);
-        let mut ret: Vec<Option<Node>> = vec![None; self.views.last().unwrap().shape.len()];
+        let (idx, _) = self.expr_idxs(Some(&idxs));
+        let ret: Vec<Option<Node>> = vec![None; self.views.last().unwrap().shape.len()];
         let nodes = match idx {
             Node::Sum { nodes, .. } => nodes,
             _ => vec![idx],
@@ -424,18 +422,23 @@ impl ShapeTracker {
         ret
     }
 
-    //   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
     pub fn unit_stride_axes(&self, ignore_valid: bool) -> Vec<isize> {
-        todo!()
+        self.real_strides(ignore_valid)
+            .iter()
+            .enumerate()
+            .filter(|(_, st)| **st == Some(Node::new_num(1)))
+            .map(|(i, _)| i as isize)
+            .collect()
     }
 
-    //   def _expr_idx(self, idx, valid):
-    //     for v in reversed(self.views[0:-1]):
-    //       valid = v.expr_node_mask(idx, valid)
-    //       idx = v.expr_node(idx)
-    //     return idx, valid
     fn _expr_idx(&self, idx: &Node, valid: &Node) -> (Node, Node) {
-        todo!()
+        let mut idx = idx.clone();
+        let mut valid = valid.clone();
+        for v in self.views.iter().rev().skip(1) {
+            valid = v.expr_node_mask(&idx, Some(&valid));
+            idx = v.expr_node(Some(&idx));
+        }
+        (idx, valid)
     }
 
     //   def simplify(self):
@@ -446,21 +449,45 @@ impl ShapeTracker {
     //         self.views = self.views[:-2] + [new_view]
     //         self.simplify()
     pub fn simplify(&mut self) {
-        todo!()
+        if self.views.len() >= 2 {
+            let new_view = merge_views(
+                self.views.get(self.views.len() - 2).unwrap(),
+                self.views.last().unwrap(),
+            );
+            if let Some(new_view) = new_view {
+                log::debug!(
+                    "st simplify : {:?} + {:?} = {:?}",
+                    self.views.get(self.views.len() - 2).unwrap(),
+                    self.views.last().unwrap(),
+                    new_view
+                );
+
+                self.views = self.views[..self.views.len() - 2].to_vec();
+                self.views.push(new_view);
+                self.simplify();
+            }
+        }
     }
 
-    //   def expr_idxs(self, idxs=None):
-    //     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-    //     idx = self.views[-1].expr_idxs(tuple(idxs))
-    //     valid = self.views[-1].expr_node_mask(idxs_to_idx(self.views[-1].shape, tuple(idxs)))
-    //     return self._expr_idx(idx, valid)
-    pub fn expr_idxs(&self, idxs: &[Node]) -> (Node, Node) {
-        todo!()
+    pub fn expr_idxs(&self, idxs: Option<&[Node]>) -> (Node, Node) {
+        let idxs = match idxs {
+            Some(idxs) => idxs.to_vec(),
+            None => self
+                .shape()
+                .iter()
+                .enumerate()
+                .map(|(i, s)| Node::new_var(&format!("idx{}", i), 0, s - 1))
+                .collect(),
+        };
+        let idx = self.views.last().unwrap().expr_idxs(&idxs);
+        let valid = self
+            .views
+            .last()
+            .unwrap()
+            .expr_node_mask(&idxs_to_idx(&self.views.last().unwrap().shape, &idxs), None);
+        self._expr_idx(&idx, &valid)
     }
 
-    //   def expr_node(self, idx='idx'):
-    //     if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
-    //     return self._expr_idx(self.views[-1].expr_node(idx), self.views[-1].expr_node_mask(idx))
     pub fn expr_node(&self, idx: &Node) -> (Node, Node) {
         self._expr_idx(
             &self.views.last().unwrap().expr_node(Some(idx)),
@@ -468,51 +495,95 @@ impl ShapeTracker {
         )
     }
 
-    //   def needs_valid(self) -> bool:
-    //     return any(v.mask is not None for v in self.views)
     pub fn needs_valid(&self) -> bool {
-        todo!()
+        self.views.iter().any(|v| v.mask.is_some())
     }
 
-    //   def __unsafe_resize(self, arg: Tuple[Tuple[int, int], ...], mask=None):
-    //     offset = get_unsafe_resize_offset(self.views[-1].strides, arg)
-    //     if self.views[-1].mask:
-    //       # move the old mask
-    //       nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.views[-1].mask, arg)])
-    //       # merge the masks if we have two
-    //       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
-    //     self.views[-1] = View(tuple([y-x for x,y in arg]), self.views[-1].strides, self.views[-1].offset+offset, mask)
-    fn unsafe_resize(&mut self, arg: &[(isize, isize)], mask: Option<&[(isize, isize)]>) {
-        todo!()
+    fn unsafe_resize(
+        &mut self,
+        arg: &[(isize, isize)],
+        mask: Option<&[(isize, isize)]>,
+    ) -> &mut Self {
+        let offset = get_unsafe_resize_offset(&self.views.last().unwrap().strides, arg);
+        let mut new_mask = None;
+        if let Some(m1) = &self.views.last().unwrap().mask {
+            // move the old mask
+            let nmask = m1
+                .iter()
+                .zip(arg)
+                .map(|((mx, my), (ax, ay))| (max(*mx - *ax, 0), min(*my - *ax, *ay - *ax)))
+                .collect::<Vec<_>>();
+            // merge the masks if we have two
+            new_mask = if let Some(m2) = mask {
+                Some(
+                    izip!(m2.iter(), nmask.as_slice().iter())
+                        .map(|((mx1, my1), (mx2, my2))| (max(*mx1, *mx2), min(*my1, *my2)))
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                Some(nmask)
+            };
+        }
+
+        let idx = self.views.len() - 1;
+        self.views[idx] = View::new(
+            arg.iter()
+                .map(|(x, y)| *y - *x)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            Some(self.views[idx].strides.as_slice()),
+            self.views[idx].offset + offset,
+            new_mask.as_deref(),
+        );
+        self
     }
 
-    //   def pad(self, arg: Tuple[Tuple[int, int], ...]):
-    //     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
-    //     if any(b or e for b, e in arg):
-    //       zvarg, mask = get_pad_args(self.shape, arg)
-    //       self.__unsafe_resize(zvarg, mask=mask)
-    //     return self
-    pub fn pad(&mut self, arg: &[(isize, isize)]) {
-        todo!()
+    pub fn pad(&mut self, arg: &[(isize, isize)]) -> &mut Self {
+        debug_assert!(
+            arg.iter().all(|(b, e)| *b >= 0 && *e >= 0) && arg.len() == self.shape().len()
+        );
+
+        if arg.iter().any(|(b, e)| *b != 0 || *e != 0) {
+            let PadArgs { zvarg, mask } = get_pad_args(self.shape().as_slice(), arg);
+            self.unsafe_resize(&zvarg, Some(&mask));
+        }
+        self
     }
 
-    //   def shrink(self, arg: Tuple[Tuple[int, int], ...]):
-    //     assert all((b>=0 and e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape)
-    //     self.__unsafe_resize(arg)
-    //     return self
-    pub fn shrink(&mut self, arg: &[(isize, isize)]) {
-        todo!()
+    pub fn shrink(&mut self, arg: &[(isize, isize)]) -> &mut Self {
+        debug_assert!(arg
+            .iter()
+            .all(|(b, e)| *b >= 0 && *e <= self.shape().len() as isize));
+        self.unsafe_resize(arg, None);
+        self
     }
 
-    //   def expand(self, new_shape: Tuple[Union[Node,int], ...]) -> ShapeTracker:
-    //     assert len(new_shape) == len(self.views[-1].shape)
-    //     assert all(is_sym_int(x) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.views[-1].strides)), f"can't expand {self.shape} into {new_shape}"
-    //     # NOTE: can the mask ever be (0,0)?
-    //     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.views[-1].mask, self.shape, new_shape)]) if self.views[-1].mask else None
-    //     self.views[-1] = View(new_shape, self.views[-1].strides, self.views[-1].offset, mask)
-    //     return self
-    pub fn expand(&mut self, new_shape: &[isize]) {
-        todo!()
+    pub fn expand(&mut self, new_shape: &[isize]) -> &mut Self {
+        debug_assert!(new_shape.len() == self.views.last().unwrap().shape.len());
+        let mask = self.views.last().unwrap().mask.as_ref().map(|mask| {
+            mask.iter()
+                .zip(self.shape().iter())
+                .zip(new_shape.iter())
+                .map(|((m, s), ns)| {
+                    if m != &(0, 1) {
+                        (0, 0)
+                    } else if s != ns {
+                        (0, *ns)
+                    } else {
+                        *m
+                    }
+                })
+                .collect::<Vec<_>>()
+        });
+
+        let idx = self.views.len() - 1;
+        self.views[idx] = View::new(
+            new_shape,
+            Some(self.views[idx].strides.as_slice()),
+            self.views[idx].offset,
+            mask.as_deref(),
+        );
+        self
     }
 
     //   def reshape(self, new_shape: Tuple[Union[Node,int], ...]):
@@ -533,32 +604,46 @@ impl ShapeTracker {
     //     if extra: self.views.append(new_view)
     //     else: self.views[-1] = new_view
     //     return self
-    pub fn reshape(&mut self, new_shape: &[isize]) {
+    pub fn reshape(&mut self, new_shape: &[isize]) -> &mut Self {
         todo!()
     }
 
-    //   def permute(self, axis: Tuple[int, ...]):
-    //     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
-    //     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
-    //     self.views[-1] = View(tuple([self.views[-1].shape[a] for a in axis]), tuple([self.views[-1].strides[a] for a in axis]), self.views[-1].offset, tuple([self.views[-1].mask[a] for a in axis]) if self.views[-1].mask is not None else None)
-    //     return self
-    pub fn permute(&mut self, axis: &[isize]) {
-        todo!()
+    pub fn permute(&mut self, axis: &[isize]) -> &mut Self {
+        debug_assert!(
+            axis.iter()
+                .all(|x| *x >= 0 && *x < self.shape().len() as isize),
+            "invalid permute {:?} for {:?}",
+            axis,
+            self.shape()
+        );
+        debug_assert!(
+            axis.len() == self.shape().len(),
+            "can't permute {:?} with {:?}",
+            self.shape(),
+            axis
+        );
+
+        let idx = self.views.len() - 1;
+        let shape: Vec<isize> = axis
+            .iter()
+            .map(|&a| self.views[idx].shape[a as usize])
+            .collect();
+        let strides: Vec<isize> = axis
+            .iter()
+            .map(|&a| self.views[idx].strides[a as usize])
+            .collect();
+        let offset = self.views[idx].offset;
+        let mask = self.views[idx].mask.as_ref().map(|mask| {
+            axis.iter()
+                .map(|&a| mask[a as usize])
+                .collect::<Vec<(isize, isize)>>()
+        });
+
+        self.views[idx] = View::new(&shape, Some(&strides), offset, mask.as_deref());
+        self
     }
 
-    //   # except for the negative case, you can build this from the others. invertible in the negative case
-    //   def stride(self, mul: Tuple[int, ...]):
-    //     assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.shape}"
-    //     strides = tuple([z*m for z,m in zip(self.views[-1].strides, mul)])
-    //     new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(self.views[-1].shape, mul)])
-    //     offset = sum([(s-1)*z for s,z,m in zip(self.views[-1].shape, self.views[-1].strides, mul) if m < 0])
-    //     mask = tuple(
-    //      [(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m),
-    //        ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.views[-1].mask,
-    //        self.views[-1].shape, mul)]) if self.views[-1].mask is not None else None
-    //     self.views[-1] = View(new_shape, strides, self.views[-1].offset + offset, mask)
-    //     return self
-    pub fn stride(&mut self, mul: &[isize]) {
+    pub fn stride(&mut self, mul: &[isize]) -> &mut Self {
         let strides = izip!(self.views.last().unwrap().strides.iter(), mul)
             .map(|(z, m)| z * m)
             .collect::<Vec<isize>>();
@@ -591,17 +676,12 @@ impl ShapeTracker {
             None
         };
 
-        let view = if let Some(m) = mask {
-            View::new(&new_shape, Some(&strides), offset, Some(&m))
-        } else {
-            View::new(&new_shape, Some(&strides), offset, None)
-        };
-
         let idx = self.views.len();
-        self.views[idx - 1] = view;
+        self.views[idx - 1] = View::new(&new_shape, Some(&strides), offset, mask.as_deref());
+        self
     }
 
-    pub fn movement_op(&mut self, op: MovementOps, arg: &[isize]) {
+    pub fn movement_op(&mut self, op: MovementOps, arg: &[isize]) -> &mut Self {
         match op {
             MovementOps::Reshape => self.reshape(arg),
             MovementOps::Expand => self.expand(arg),
@@ -611,7 +691,7 @@ impl ShapeTracker {
         }
     }
 
-    pub fn movement_op1(&mut self, op: MovementOps, arg: &[(isize, isize)]) {
+    pub fn movement_op1(&mut self, op: MovementOps, arg: &[(isize, isize)]) -> &mut Self {
         match op {
             MovementOps::Pad => self.pad(arg),
             MovementOps::Shrink => self.shrink(arg),
