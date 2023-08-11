@@ -39,7 +39,7 @@ impl CheckingShapeTracker<f32> {
     pub fn new(shape: &[isize]) -> Self {
         let st = ShapeTracker::with_shape(shape);
         let shape1 = shape.iter().map(|x| *x as usize).collect_vec();
-        let t = Array::range(0.0, shape.iter().product() as f32, 1.0)
+        let t = Array::range(0.0, shape.to_vec().iter().map(|x| *x as f32).product(), 1.0)
             .into_shape(shape1.to_vec())
             .unwrap();
         Self { st, t }
