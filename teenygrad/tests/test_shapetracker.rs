@@ -26,6 +26,28 @@
 //   exec(f"valid={valid.render()};idx={idx.render()}", None, locals)
 //   return locals["idx"] if locals["valid"] else -1
 
+use itertools::{traits, Itertools};
+use ndarray::{prelude::*, IxDynImpl};
+use teenygrad::shape::shapetracker::ShapeTracker;
+
+struct CheckingShapeTracker {
+    st: ShapeTracker,
+    t: Array<usize, IxDyn>,
+}
+
+impl CheckingShapeTracker {
+    pub fn new(shape: &[isize]) -> Self {
+        let st = ShapeTracker::with_shape(shape);
+        let shape1 = shape.iter().map(|x| *x as usize).collect_vec();
+        let values: Vec<usize> = (0..shape.iter().product())
+            .step_by(1)
+            .map(|x| x as usize)
+            .collect();
+        let t = Array::from_vec(values).into_shape(shape1.to_vec()).unwrap();
+        Self { st, t }
+    }
+}
+
 // class CheckingShapeTracker:
 //   def __init__(self, shape):
 //     self.st = ShapeTracker(shape)
