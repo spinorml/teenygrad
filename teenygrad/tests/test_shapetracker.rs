@@ -20,15 +20,9 @@
  * SOFTWARE.
  */
 
-// def shapetracker_getitem(st, val):
-//   locals = {"idx": val, "valid": 1}
-//   idx, valid = st.expr_node()
-//   exec(f"valid={valid.render()};idx={idx.render()}", None, locals)
-//   return locals["idx"] if locals["valid"] else -1
-
 use itertools::{traits, Itertools};
 use ndarray::{prelude::*, IxDynImpl};
-use teenygrad::shape::shapetracker::ShapeTracker;
+use teenygrad::shape::shapetracker::{ShapeTracker, View};
 
 struct CheckingShapeTracker<T> {
     st: ShapeTracker,
@@ -44,65 +38,102 @@ impl CheckingShapeTracker<f32> {
             .unwrap();
         Self { st, t }
     }
+
+    // def shapetracker_getitem(st, val):
+    //   locals = {"idx": val, "valid": 1}
+    //   idx, valid = st.expr_node()
+    //   exec(f"valid={valid.render()};idx={idx.render()}", None, locals)
+    //   return locals["idx"] if locals["valid"] else -1
+    pub fn shapetracker_getitem(st: &ShapeTracker, val: isize) {
+        todo!()
+    }
+
+    pub fn shape(&self) -> &[usize] {
+        self.t.shape()
+    }
+
+    pub fn simplify(&mut self) {
+        self.st.simplify();
+    }
+
+    pub fn reshape(&mut self, new_shape: &[isize]) {
+        self.st.reshape(new_shape);
+        let new_shape1 = new_shape.iter().map(|x| *x as usize).collect_vec();
+        self.t = self.t.clone().into_shape(new_shape1).unwrap();
+    }
+
+    pub fn permute(&mut self, axis: &[isize]) {
+        self.st.permute(axis);
+        self.t = self
+            .t
+            .clone()
+            .permuted_axes(axis.iter().map(|x| *x as usize).collect::<Vec<_>>());
+    }
+
+    pub fn expand(&mut self, new_shape: &[isize]) {
+        self.st.expand(new_shape);
+        let new_shape1 = new_shape.iter().map(|x| *x as usize).collect_vec();
+        self.t = self.t.clone().broadcast(new_shape1).unwrap().to_owned();
+    }
+
+    pub fn flip(&mut self, axis: &[isize]) {
+        //     self.st.stride(tuple(-1 if i in axis else 1 for i in range(len(self.shape))))
+        self.st.stride(
+            (0..self.shape().len())
+                .map(|i| if axis.contains(&(i as isize)) { -1 } else { 1 })
+                .collect_vec()
+                .as_slice(),
+        );
+        self.t = self.t.clone().reversed_axes();
+    }
+
+    //   def shrink(self, arg):
+    //     self.st.shrink(arg)
+    //     self.t = self.t[tuple([slice(x[0], x[1]) for x in arg])]
+    pub fn shrink(&mut self, arg: &[(isize, isize)]) {
+        todo!()
+    }
+
+    //   def pad(self, arg):
+    //     self.st.pad(arg)
+    //     self.t = np.pad(self.t, arg, constant_values=-1)
+    pub fn pad(&mut self, arg: &[(isize, isize)]) {
+        todo!()
+    }
+
+    //   def stride(self, arg):
+    //     self.st.stride(arg)
+    //     self.t = self.t[tuple([slice(None, None, x) for x in arg])]
+    pub fn stride(&mut self, arg: &[isize]) {
+        todo!()
+    }
+
+    //   def __getitem__(self, val):
+    //     return self.t.flatten()[val]
+    pub fn getitem(&self, val: isize) -> f32 {
+        todo!()
+    }
+
+    pub fn views(&self) -> &[View] {
+        self.st.views.as_slice()
+    }
+
+    pub fn contiguous(&self) -> bool {
+        self.st.contiguous()
+    }
+
+    //   def assert_same(self):
+    //     x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
+    //     y = [self[i] for i in range(prod(self.shape))]
+    //     idx, valid = self.st.expr_node()
+    //     if DEBUG >= 1: print(x, y, self.st.shape, self.shape, idx.render(), valid.render(), self.st)
+    //     assert self.st.shape == self.shape
+    //     assert x == y, f"mismatch shapetracker:{x} real:{y}"
+    pub fn assert_same(&self) {
+        todo!()
+    }
 }
 
-// class CheckingShapeTracker:
-//   def __init__(self, shape):
-//     self.st = ShapeTracker(shape)
-//     self.t = np.arange(prod(shape), dtype=np.int32).reshape(shape)
-
-//   @property
-//   def shape(self):
-//     return self.t.shape
-
-//   def simplify(self): self.st.simplify()
-
-//   def reshape(self, new_shape):
-//     self.st.reshape(new_shape)
-//     self.t = self.t.reshape(new_shape)
-
-//   def permute(self, axis):
-//     self.st.permute(axis)
-//     self.t = np.transpose(self.t, axis)
-
-//   def expand(self, new_shape):
-//     self.st.expand(new_shape)
-//     self.t = np.broadcast_to(self.t, new_shape)
-
-//   def flip(self, axis):
-//     self.st.stride(tuple(-1 if i in axis else 1 for i in range(len(self.shape))))
-//     self.t = np.flip(self.t, axis)
-
-//   def shrink(self, arg):
-//     self.st.shrink(arg)
-//     self.t = self.t[tuple([slice(x[0], x[1]) for x in arg])]
-
-//   def pad(self, arg):
-//     self.st.pad(arg)
-//     self.t = np.pad(self.t, arg, constant_values=-1)
-
-//   def stride(self, arg):
-//     self.st.stride(arg)
-//     self.t = self.t[tuple([slice(None, None, x) for x in arg])]
-
-//   def __getitem__(self, val):
-//     return self.t.flatten()[val]
-
-//   @property
-//   def views(self): return self.st.views
-
-//   @property
-//   def contiguous(self): return self.st.contiguous
-
-//   def assert_same(self):
-//     x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
-//     y = [self[i] for i in range(prod(self.shape))]
-//     idx, valid = self.st.expr_node()
-//     if DEBUG >= 1: print(x, y, self.st.shape, self.shape, idx.render(), valid.render(), self.st)
-//     assert self.st.shape == self.shape
-//     assert x == y, f"mismatch shapetracker:{x} real:{y}"
-
-// class TestRealIssues(unittest.TestCase):
 #[test]
 fn test_reshape_doesnt_multiview() {
     //   def test_reshape_doesnt_multiview(self):
@@ -110,7 +141,17 @@ fn test_reshape_doesnt_multiview() {
     //     self.st.reshape((128, 2, 256, 2, 2, 2, 2, 2, 256, 8, 2))
     //     assert len(self.st.views) == 1
 
-    todo!()
+    let mut st = ShapeTracker::with_views(
+        vec![View::new(
+            &[256, 256, 2, 2, 2, 2, 2, 256, 8, 2],
+            Some(&[0, 8, 0, 4, 0, 0, 2, 16384, 2048, 1]),
+            0,
+            None,
+        )]
+        .as_ref(),
+    );
+    st.reshape(&[128, 2, 256, 2, 2, 2, 2, 2, 256, 8, 2]);
+    assert_eq!(st.views.len(), 1);
 }
 
 // class TestRealDoesntSimplify(unittest.TestCase):

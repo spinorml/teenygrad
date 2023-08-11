@@ -323,7 +323,7 @@ pub fn get_unsafe_resize_offset(strides: &[isize], arg: &[(isize, isize)]) -> is
 
 #[derive(Debug, Clone)]
 pub struct ShapeTracker {
-    views: Vec<View>,
+    pub views: Vec<View>,
 }
 
 impl ShapeTracker {
