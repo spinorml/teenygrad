@@ -30,20 +30,18 @@ use itertools::{traits, Itertools};
 use ndarray::{prelude::*, IxDynImpl};
 use teenygrad::shape::shapetracker::ShapeTracker;
 
-struct CheckingShapeTracker {
+struct CheckingShapeTracker<T> {
     st: ShapeTracker,
-    t: Array<usize, IxDyn>,
+    t: Array<T, IxDyn>,
 }
 
-impl CheckingShapeTracker {
+impl CheckingShapeTracker<f32> {
     pub fn new(shape: &[isize]) -> Self {
         let st = ShapeTracker::with_shape(shape);
         let shape1 = shape.iter().map(|x| *x as usize).collect_vec();
-        let values: Vec<usize> = (0..shape.iter().product())
-            .step_by(1)
-            .map(|x| x as usize)
-            .collect();
-        let t = Array::from_vec(values).into_shape(shape1.to_vec()).unwrap();
+        let t = Array::range(0.0, shape.iter().product() as f32, 1.0)
+            .into_shape(shape1.to_vec())
+            .unwrap();
         Self { st, t }
     }
 }
