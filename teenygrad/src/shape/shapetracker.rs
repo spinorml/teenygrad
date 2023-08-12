@@ -123,12 +123,12 @@ pub fn filter_strides(shape: &[NodeOrInt], strides: &[isize]) -> Vec<isize> {
 
 #[derive(Debug, Clone)]
 pub struct View {
-    shape: Vec<NodeOrInt>,
-    strides: Vec<isize>,
-    offset: isize,
-    mask: Option<Vec<(isize, isize)>>,
-    contiguous: bool,
-    shape_strides: Vec<(isize, isize)>,
+    pub shape: Vec<NodeOrInt>,
+    pub strides: Vec<isize>,
+    pub offset: isize,
+    pub mask: Option<Vec<(isize, isize)>>,
+    pub contiguous: bool,
+    pub shape_strides: Vec<(isize, isize)>,
 }
 
 impl View {
@@ -691,14 +691,19 @@ impl ShapeTracker {
             }
         }
 
-        //     if self.views[-1].shape == new_shape: return self
-        //     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
-
         if self.views.last().unwrap().shape == new_shape {
             return self;
         }
 
-        todo!()
+        let (new_view, extra) = _reshape(self.views.last().unwrap(), new_shape);
+        if extra {
+            self.views.push(new_view);
+        } else {
+            let idx = self.views.len() - 1;
+            self.views[idx] = new_view;
+        }
+
+        self
     }
 
     pub fn permute(&mut self, axis: &[NodeOrInt]) -> &mut Self {
