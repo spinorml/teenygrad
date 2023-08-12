@@ -49,14 +49,38 @@ pub struct NodeAttrs {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Node {
-    Var { expr: String, attrs: NodeAttrs },
-    Num { attrs: NodeAttrs },
-    LessThan { a: Box<Node>, attrs: NodeAttrs },
-    Mult { a: Box<Node>, attrs: NodeAttrs },
-    Div { a: Box<Node>, attrs: NodeAttrs },
-    Mod { a: Box<Node>, attrs: NodeAttrs },
-    Sum { nodes: Vec<Node>, attrs: NodeAttrs },
-    And { nodes: Vec<Node>, attrs: NodeAttrs },
+    Var {
+        expr: String,
+        val: Option<isize>,
+        attrs: NodeAttrs,
+    },
+    Num {
+        attrs: NodeAttrs,
+    },
+    LessThan {
+        a: Box<Node>,
+        attrs: NodeAttrs,
+    },
+    Mult {
+        a: Box<Node>,
+        attrs: NodeAttrs,
+    },
+    Div {
+        a: Box<Node>,
+        attrs: NodeAttrs,
+    },
+    Mod {
+        a: Box<Node>,
+        attrs: NodeAttrs,
+    },
+    Sum {
+        nodes: Vec<Node>,
+        attrs: NodeAttrs,
+    },
+    And {
+        nodes: Vec<Node>,
+        attrs: NodeAttrs,
+    },
 }
 
 impl Display for Node {
@@ -111,7 +135,9 @@ impl Debug for Node {
         }
 
         match self {
-            Node::Var { expr, attrs } => write!(f, "{:?}[{:?}-{:?}]", expr, attrs.min, attrs.max)?,
+            Node::Var { expr, val, attrs } => {
+                write!(f, "{:?}{:?}[{:?}-{:?}]", expr, val, attrs.min, attrs.max)?
+            }
             Node::Num { attrs } => write!(f, "{:?}", attrs.b)?,
             Node::LessThan { a, attrs } => write!(f, "({:?}<{:?})", a, attrs.b)?,
             Node::Mult { a, attrs } => write!(f, "({:?}*{:?})", a, attrs.b)?,
@@ -151,6 +177,7 @@ impl Node {
         } else {
             Node::Var {
                 expr: expr.to_string(),
+                val: None,
                 attrs: NodeAttrs { b: 0, min, max },
             }
         }

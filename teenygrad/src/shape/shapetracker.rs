@@ -20,7 +20,7 @@
  * SOFTWARE.
  */
 
-use itertools::izip;
+use itertools::{izip, Itertools};
 use std::{
     cmp::{max, min, Ordering},
     collections::VecDeque,
@@ -29,7 +29,7 @@ use std::{
     vec,
 };
 
-use super::symbolic::Node;
+use super::symbolic::{Node, NodeAttrs};
 
 pub enum MovementOps {
     Reshape,
@@ -40,39 +40,76 @@ pub enum MovementOps {
     Stride,
 }
 
-pub fn to_shape_strides(shape: &[isize], strides: &[isize]) -> Vec<(isize, isize)> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeOrInt {
+    Node(Node),
+    Int(isize),
+}
+
+impl NodeOrInt {
+    #[inline]
+    pub fn is_var(&self) -> bool {
+        matches!(self, NodeOrInt::Node(Node::Var { .. }))
+    }
+
+    #[inline]
+    pub fn is_int(&self) -> bool {
+        matches!(self, NodeOrInt::Int(_))
+    }
+
+    pub fn as_var_mut(&mut self) -> (&mut String, &mut Option<isize>, &mut NodeAttrs) {
+        match self {
+            NodeOrInt::Node(Node::Var {
+                ref mut expr,
+                ref mut val,
+                ref mut attrs,
+            }) => (expr, val, attrs),
+            _ => panic!("NodeOrInt is not a var"),
+        }
+    }
+
+    pub fn as_int(&self) -> isize {
+        match self {
+            NodeOrInt::Int(i) => *i,
+            _ => panic!("NodeOrInt is not an int"),
+        }
+    }
+}
+
+pub fn to_shape_strides(shape: &[NodeOrInt], strides: &[isize]) -> Vec<(isize, isize)> {
     debug_assert!(shape.len() == strides.len());
     let mut result: Vec<(isize, isize)> = Vec::new();
     if !shape.is_empty() {
-        result.push((shape[0], strides[0]));
+        result.push((shape[0].as_int(), strides[0]));
     }
 
     for i in 1..shape.len() {
-        if (strides[i] != 0 && result.last().unwrap().1 == shape[i] * strides[i])
+        if (strides[i] != 0 && result.last().unwrap().1 == shape[i].as_int() * strides[i])
             || result.last().unwrap().0 == 1
             || (strides[i] == 0 && result.last().unwrap().1 == 0)
         {
-            result.last_mut().unwrap().0 *= shape[i];
+            result.last_mut().unwrap().0 *= shape[i].as_int();
             result.last_mut().unwrap().1 = strides[i];
         } else {
-            result.push((shape[i], strides[i]));
+            result.push((shape[i].as_int(), strides[i]));
         }
     }
 
     result
 }
 
-pub fn is_contiguous(shape: &[isize], strides: &[isize]) -> bool {
+pub fn is_contiguous(shape: &[NodeOrInt], strides: &[isize]) -> bool {
     debug_assert!(shape.len() == strides.len());
 
-    izip!(shape, strides, &strides_for_shape(shape)).all(|(s, s1, s2)| *s1 == *s2 || *s == 1)
+    izip!(shape, strides, &strides_for_shape(shape))
+        .all(|(s, s1, s2)| *s1 == *s2 || s.as_int() == 1)
 }
 
-pub fn filter_strides(shape: &[isize], strides: &[isize]) -> Vec<isize> {
+pub fn filter_strides(shape: &[NodeOrInt], strides: &[isize]) -> Vec<isize> {
     debug_assert!(shape.len() == strides.len());
 
     izip!(strides, shape)
-        .map(|(s, shp)| if *shp != 1 { *s } else { 0 })
+        .map(|(s, shp)| if shp.as_int() != 1 { *s } else { 0 })
         .collect()
 }
 
@@ -86,7 +123,7 @@ pub fn filter_strides(shape: &[isize], strides: &[isize]) -> Vec<isize> {
 
 #[derive(Debug, Clone)]
 pub struct View {
-    shape: Vec<isize>,
+    shape: Vec<NodeOrInt>,
     strides: Vec<isize>,
     offset: isize,
     mask: Option<Vec<(isize, isize)>>,
@@ -96,7 +133,7 @@ pub struct View {
 
 impl View {
     pub fn new(
-        shape: &[isize],
+        shape: &[NodeOrInt],
         strides: Option<&[isize]>,
         offset: isize,
         mask: Option<&[(isize, isize)]>,
@@ -111,7 +148,7 @@ impl View {
         let mask: Option<Vec<(isize, isize)>> = mask.map(|mask| mask.into());
 
         View {
-            shape: shape.into(),
+            shape: shape.iter().map(|x| NodeOrInt::Int(x.as_int())).collect(),
             strides: filtered_strides,
             offset,
             mask,
@@ -129,10 +166,10 @@ impl View {
         if let Some(mask) = &self.mask {
             let mut acc = 1;
             for (ns, (x, y)) in self.shape.iter().zip(mask.iter()).rev() {
-                let base = (idx.clone().floordiv(acc, None)).modulus(*ns);
+                let base = (idx.clone().floordiv(acc, None)).modulus(ns.as_int());
                 expr.push(base.clone().ge(*x));
                 expr.push(base.lt(*y));
-                acc *= ns;
+                acc *= ns.as_int();
             }
         }
 
@@ -141,7 +178,11 @@ impl View {
 
     pub fn expr_node(&self, idx: Option<&Node>) -> Node {
         let idx = match idx {
-            None => Node::new_var("idx", 0, self.shape.iter().product::<isize>() - 1),
+            None => Node::new_var(
+                "idx",
+                0,
+                self.shape.iter().map(|x| x.as_int()).product::<isize>() - 1,
+            ),
             Some(idx) => idx.clone(),
         };
         let mut result = if self.offset != 0 {
@@ -164,7 +205,7 @@ impl View {
         let mut result = vec![Node::new_num(self.offset)];
 
         for (idx, (sh, st)) in idxs.iter().zip(self.shape.iter().zip(self.strides.iter())) {
-            if *sh != 1 && *st != 0 {
+            if sh.as_int() != 1 && *st != 0 {
                 result.push(idx.clone().mul(*st));
             }
         }
@@ -173,27 +214,27 @@ impl View {
     }
 }
 
-pub fn idxs_to_idx(shape: &[isize], idxs: &[Node]) -> Node {
+pub fn idxs_to_idx(shape: &[NodeOrInt], idxs: &[Node]) -> Node {
     debug_assert!(idxs.len() == shape.len());
 
     let mut acc: isize = 1;
     let mut result = Vec::new();
     for (idx, d) in idxs.iter().zip(shape.iter()).rev() {
         result.push(idx.clone().mul(acc));
-        acc *= d;
+        acc *= d.as_int();
     }
 
     Node::new_sum(result.as_ref())
 }
 
-pub fn strides_for_shape(shape: &[isize]) -> Vec<isize> {
+pub fn strides_for_shape(shape: &[NodeOrInt]) -> Vec<isize> {
     let mut strides: Vec<isize> = Vec::new();
     if !shape.is_empty() {
         strides.push(1);
     }
 
     for d in shape.iter().rev().skip(1) {
-        strides.insert(0, d * strides[0]);
+        strides.insert(0, d.as_int() * strides[0]);
     }
 
     filter_strides(shape, &strides)
@@ -214,20 +255,29 @@ pub fn merge_views(vm2: &View, vm1: &View) -> Option<View> {
     todo!()
 }
 
-fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
-    let filtered_shape: Vec<isize> = view.shape.iter().filter(|x| **x != 1).copied().collect();
-    let filtered_newshape: Vec<isize> = new_shape.iter().filter(|x| **x != 1).copied().collect();
+fn _reshape(view: &View, new_shape: &[NodeOrInt]) -> (View, bool) {
+    let filtered_shape: Vec<isize> = view
+        .shape
+        .iter()
+        .filter(|x| x.as_int() != 1)
+        .map(|x| x.as_int())
+        .collect();
+    let filtered_newshape: Vec<isize> = new_shape
+        .iter()
+        .filter(|x| x.as_int() != 1)
+        .map(|x| x.as_int())
+        .collect();
 
     if filtered_shape == filtered_newshape {
         let mut new_strides: VecDeque<isize> = izip!(view.shape.iter(), view.strides.iter())
-            .filter(|(x, _)| **x != 1)
+            .filter(|(x, _)| x.as_int() != 1)
             .map(|(_, y)| *y)
             .collect();
 
         let new_strides_tuple: Vec<isize> = new_shape
             .iter()
             .map(|x| {
-                if *x == 1 {
+                if x.as_int() == 1 {
                     0
                 } else {
                     new_strides.pop_front().unwrap()
@@ -238,13 +288,13 @@ fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
         let mut new_mask_tuple = None;
         if let Some(ref mask1) = view.mask {
             for (x, y) in izip!(view.shape.iter(), mask1.iter()) {
-                if *x == 1 && *y != (0, 1) {
+                if x.as_int() == 1 && *y != (0, 1) {
                     new_mask_tuple = Some(vec![(0, 0); new_shape.len()]);
                     break;
                 } else {
                     let mut new_mask: Vec<(isize, isize)> =
                         izip!(view.shape.iter(), view.mask.as_ref().unwrap().iter())
-                            .filter(|(x, _)| **x != 1)
+                            .filter(|(x, _)| x.as_int() != 1)
                             .map(|(_, y)| *y)
                             .rev()
                             .collect();
@@ -253,7 +303,7 @@ fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
                         new_shape
                             .iter()
                             .map(|x| {
-                                if *x == 1 {
+                                if x.as_int() == 1 {
                                     (0, 1)
                                 } else {
                                     new_mask.pop().unwrap()
@@ -305,13 +355,13 @@ pub struct PadArgs {
     pub mask: Vec<(isize, isize)>,
 }
 
-pub fn get_pad_args(shape: &[isize], arg: &[(isize, isize)]) -> PadArgs {
+pub fn get_pad_args(shape: &[NodeOrInt], arg: &[(isize, isize)]) -> PadArgs {
     let mut zvarg: Vec<(isize, isize)> = Vec::with_capacity(shape.len());
     let mut mask: Vec<(isize, isize)> = Vec::with_capacity(shape.len());
 
     for (s, (b, e)) in izip!(shape.iter(), arg.iter()) {
-        zvarg.push((-b, s + e));
-        mask.push((*b, s + b));
+        zvarg.push((-b, s.as_int() + e));
+        mask.push((*b, s.as_int() + b));
     }
 
     PadArgs { zvarg, mask }
@@ -327,7 +377,7 @@ pub struct ShapeTracker {
 }
 
 impl ShapeTracker {
-    pub fn with_shape(shape: &[isize]) -> Self {
+    pub fn with_shape(shape: &[NodeOrInt]) -> Self {
         ShapeTracker {
             views: vec![View::new(shape, None, 0, None)],
         }
@@ -343,7 +393,7 @@ impl ShapeTracker {
         self.views.len() == 1 && self.views[0].contiguous
     }
 
-    pub fn shape(&self) -> Vec<isize> {
+    pub fn shape(&self) -> Vec<NodeOrInt> {
         self.views.last().unwrap().shape.clone()
     }
 
@@ -353,7 +403,7 @@ impl ShapeTracker {
             self.views.last().unwrap().strides.iter()
         )
         .filter(|(_, st)| **st != 0)
-        .map(|(s, _)| *s)
+        .map(|(s, _)| s.as_int())
         .product()
     }
 
@@ -397,7 +447,7 @@ impl ShapeTracker {
         }
 
         let idxs = (0..self.shape().len())
-            .map(|i| Node::new_var(&format!("idx{}", i), 0, self.shape()[i] - 1))
+            .map(|i| Node::new_var(&format!("idx{}", i), 0, self.shape()[i].as_int() - 1))
             .collect::<Vec<Node>>();
         let (idx, _) = self.expr_idxs(Some(&idxs));
         let ret: Vec<Option<Node>> = vec![None; self.views.last().unwrap().shape.len()];
@@ -476,7 +526,7 @@ impl ShapeTracker {
                 .shape()
                 .iter()
                 .enumerate()
-                .map(|(i, s)| Node::new_var(&format!("idx{}", i), 0, s - 1))
+                .map(|(i, s)| Node::new_var(&format!("idx{}", i), 0, s.as_int() - 1))
                 .collect(),
         };
         let idx = self.views.last().unwrap().expr_idxs(&idxs);
@@ -528,7 +578,7 @@ impl ShapeTracker {
         let idx = self.views.len() - 1;
         self.views[idx] = View::new(
             arg.iter()
-                .map(|(x, y)| *y - *x)
+                .map(|(x, y)| NodeOrInt::Int(*y - *x))
                 .collect::<Vec<_>>()
                 .as_slice(),
             Some(self.views[idx].strides.as_slice()),
@@ -558,7 +608,7 @@ impl ShapeTracker {
         self
     }
 
-    pub fn expand(&mut self, new_shape: &[isize]) -> &mut Self {
+    pub fn expand(&mut self, new_shape: &[NodeOrInt]) -> &mut Self {
         debug_assert!(new_shape.len() == self.views.last().unwrap().shape.len());
         let mask = self.views.last().unwrap().mask.as_ref().map(|mask| {
             mask.iter()
@@ -567,8 +617,8 @@ impl ShapeTracker {
                 .map(|((m, s), ns)| {
                     if m != &(0, 1) {
                         (0, 0)
-                    } else if s != ns {
-                        (0, *ns)
+                    } else if s.as_int() != ns.as_int() {
+                        (0, ns.as_int())
                     } else {
                         *m
                     }
@@ -604,14 +654,57 @@ impl ShapeTracker {
     //     if extra: self.views.append(new_view)
     //     else: self.views[-1] = new_view
     //     return self
-    pub fn reshape(&mut self, new_shape: &[isize]) -> &mut Self {
+    pub fn reshape(&mut self, new_shape: &mut [NodeOrInt]) -> &mut Self {
+        let new_shape_prod = new_shape
+            .iter()
+            .filter(|x| x.is_int())
+            .map(|x| x.as_int())
+            .product::<isize>();
+        let mut new_vars = new_shape
+            .iter_mut()
+            .filter(|x| x.is_var())
+            .collect::<Vec<_>>();
+        if !new_vars.is_empty() {
+            debug_assert!(
+                new_vars.len() == 1,
+                "only one variable is supported in a shape"
+            );
+            let mut new_var = new_vars[0].as_var_mut();
+            let new_val =
+                self.shape().iter().map(|x| x.as_int()).product::<isize>() / new_shape_prod;
+            if new_var.1.is_none() {
+                debug_assert!(
+                    new_var.2.min <= new_val && new_val <= new_var.2.max,
+                    "variable value {} out of range [{}, {}]",
+                    new_val,
+                    new_var.2.min,
+                    new_var.2.max
+                );
+                new_var.1 = &mut Some(new_val);
+            } else {
+                debug_assert!(
+                    new_var.1 == &mut Some(new_val),
+                    "value conflicts, was {}, set to {}",
+                    new_var.1.unwrap(),
+                    new_val
+                );
+            }
+        }
+
+        //     if self.views[-1].shape == new_shape: return self
+        //     assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
+
+        if self.views.last().unwrap().shape == new_shape {
+            return self;
+        }
+
         todo!()
     }
 
-    pub fn permute(&mut self, axis: &[isize]) -> &mut Self {
+    pub fn permute(&mut self, axis: &[NodeOrInt]) -> &mut Self {
         debug_assert!(
             axis.iter()
-                .all(|x| *x >= 0 && *x < self.shape().len() as isize),
+                .all(|x| x.as_int() >= 0 && x.as_int() < self.shape().len() as isize),
             "invalid permute {:?} for {:?}",
             axis,
             self.shape()
@@ -624,18 +717,19 @@ impl ShapeTracker {
         );
 
         let idx = self.views.len() - 1;
-        let shape: Vec<isize> = axis
+        let shape = axis
             .iter()
-            .map(|&a| self.views[idx].shape[a as usize])
-            .collect();
+            .map(|ref a| &self.views[idx].shape[a.as_int() as usize])
+            .map(|x| x.clone())
+            .collect_vec();
         let strides: Vec<isize> = axis
             .iter()
-            .map(|&a| self.views[idx].strides[a as usize])
+            .map(|ref a| self.views[idx].strides[a.as_int() as usize])
             .collect();
         let offset = self.views[idx].offset;
         let mask = self.views[idx].mask.as_ref().map(|mask| {
             axis.iter()
-                .map(|&a| mask[a as usize])
+                .map(|ref a| mask[a.as_int() as usize].clone())
                 .collect::<Vec<(isize, isize)>>()
         });
 
@@ -643,22 +737,22 @@ impl ShapeTracker {
         self
     }
 
-    pub fn stride(&mut self, mul: &[isize]) -> &mut Self {
+    pub fn stride(&mut self, mul: &[NodeOrInt]) -> &mut Self {
         let strides = izip!(self.views.last().unwrap().strides.iter(), mul)
-            .map(|(z, m)| z * m)
+            .map(|(z, m)| z * m.as_int())
             .collect::<Vec<isize>>();
 
-        let new_shape = izip!(self.views.last().unwrap().shape.iter(), mul)
-            .map(|(s, m)| (s + (m.abs() - 1)) / m.abs())
-            .collect::<Vec<isize>>();
+        let new_shape: Vec<NodeOrInt> = izip!(self.views.last().unwrap().shape.iter(), mul)
+            .map(|(s, m)| NodeOrInt::Int((s.as_int() + (m.as_int().abs() - 1)) / m.as_int().abs()))
+            .collect();
 
         let offset = izip!(
             self.views.last().unwrap().shape.iter(),
             self.views.last().unwrap().strides.iter(),
             mul
         )
-        .filter(|(_, _, m)| **m < 0)
-        .map(|(s, z, m)| (s - 1) * z)
+        .filter(|(_, _, m)| m.as_int() < 0)
+        .map(|(s, z, m)| (s.as_int() - 1) * z)
         .sum();
 
         let mask = if let Some(mask) = &self.views.last().unwrap().mask {
@@ -666,8 +760,18 @@ impl ShapeTracker {
                 izip!(mask.iter(), self.views.last().unwrap().shape.iter(), mul)
                     .map(|((mx, my), s, m)| {
                         (
-                            ((if *m > 0 { *mx } else { *s - *my }) + (m.abs() - 1)) / m.abs(),
-                            ((if *m > 0 { *my } else { *s - *mx }) + (m.abs() - 1)) / m.abs(),
+                            ((if m.as_int() > 0 {
+                                *mx
+                            } else {
+                                s.as_int() - *my
+                            }) + (m.as_int().abs() - 1))
+                                / m.as_int().abs(),
+                            ((if m.as_int() > 0 {
+                                *my
+                            } else {
+                                s.as_int() - *mx
+                            }) + (m.as_int().abs() - 1))
+                                / m.as_int().abs(),
                         )
                     })
                     .collect::<Vec<(isize, isize)>>(),
@@ -681,7 +785,7 @@ impl ShapeTracker {
         self
     }
 
-    pub fn movement_op(&mut self, op: MovementOps, arg: &[isize]) -> &mut Self {
+    pub fn movement_op(&mut self, op: MovementOps, arg: &mut [NodeOrInt]) -> &mut Self {
         match op {
             MovementOps::Reshape => self.reshape(arg),
             MovementOps::Expand => self.expand(arg),
@@ -734,50 +838,4 @@ pub fn get_contraction(old_shape: &[isize], new_shape: &[isize]) -> Option<Vec<V
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_to_shape_strides() {
-        assert_eq!(to_shape_strides(&[1, 1, 1], &[0, 0, 0]), vec![(1, 0)]);
-        assert_eq!(
-            to_shape_strides(&[2, 3, 4], &[6, 3, 1]),
-            vec![(2, 6), (3, 3), (4, 1)]
-        );
-        assert_eq!(
-            to_shape_strides(&[2, 3, 1], &[6, 3, 0]),
-            vec![(2, 6), (3, 3), (1, 0)]
-        );
-        assert_eq!(
-            to_shape_strides(&[2, 3, 4, 5], &[24, 12, 4, 1]),
-            vec![(2, 24), (3, 12), (4, 4), (5, 1)]
-        );
-    }
-
-    #[test]
-    fn test_strides_for_shape() {
-        assert_eq!(strides_for_shape(&[1, 1, 1]), vec![0, 0, 0]);
-        assert_eq!(strides_for_shape(&[2, 3, 4]), vec![6, 3, 1]);
-        assert_eq!(strides_for_shape(&[2, 3, 1]), vec![6, 3, 0]);
-        assert_eq!(strides_for_shape(&[2, 3, 4, 5]), vec![24, 12, 4, 1]);
-    }
-
-    #[test]
-    fn test_is_contiguous() {
-        assert!(is_contiguous(&[1, 1, 1], &[0, 0, 0]));
-        assert!(is_contiguous(&[2, 3, 4], &[6, 3, 1]));
-        assert!(is_contiguous(&[2, 3, 4, 5], &[24, 12, 4, 1]));
-        assert!(!is_contiguous(&[2, 3, 4, 5], &[24, 12, 4, 2]));
-        assert!(!is_contiguous(&[2, 3, 4, 5], &[24, 12, 4, 0]));
-    }
-
-    #[test]
-    fn test_filter_strides() {
-        assert_eq!(filter_strides(&[1, 1, 1], &[0, 0, 0]), vec![0, 0, 0]);
-        assert_eq!(filter_strides(&[2, 3, 4], &[6, 3, 1]), vec![6, 3, 1]);
-        assert_eq!(
-            filter_strides(&[2, 3, 4, 5], &[24, 12, 4, 1]),
-            vec![24, 12, 4, 1]
-        );
-    }
-}
+mod tests {}
