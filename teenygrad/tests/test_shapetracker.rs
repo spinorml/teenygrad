@@ -191,6 +191,14 @@ fn test_reshape_doesnt_multiview() {
 //     assert len(self.st.views) != 1
 //     assert None in st
 
+fn test_real_doesnt_simplify_check(st: &mut ShapeTracker) {
+    let strides = st.real_strides(false);
+    st.simplify();
+
+    assert_eq!(st.views.len(), 1);
+    assert!(strides.contains(&None));
+}
+
 #[test]
 fn test_real_doesnt_simplify_1() {
     //   def test_1(self):
@@ -199,7 +207,7 @@ fn test_real_doesnt_simplify_1() {
     //       View((8, 6, 11), (66, 11, 1), 0, None)])
     //     assert self.st.real_strides() == (33, None, 1)
 
-    let st = ShapeTracker::with_views(
+    let mut st = ShapeTracker::with_views(
         vec![
             View::new(
                 &[8, 3, 1, 2, 11, 1]
@@ -226,6 +234,8 @@ fn test_real_doesnt_simplify_1() {
         st.real_strides(false),
         vec![Some(Node::new_num(33)), None, Some(Node::new_num(1))]
     );
+
+    test_real_doesnt_simplify_check(&mut st);
 }
 
 #[test]

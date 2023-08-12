@@ -498,7 +498,7 @@ impl ShapeTracker {
     //         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
     //         self.views = self.views[:-2] + [new_view]
     //         self.simplify()
-    pub fn simplify(&mut self) {
+    pub fn simplify(&mut self) -> Vec<Option<NodeOrInt>> {
         if self.views.len() >= 2 {
             let new_view = merge_views(
                 self.views.get(self.views.len() - 2).unwrap(),
@@ -517,6 +517,7 @@ impl ShapeTracker {
                 self.simplify();
             }
         }
+        todo!()
     }
 
     pub fn expr_idxs(&self, idxs: Option<&[Node]>) -> (Node, Node) {
