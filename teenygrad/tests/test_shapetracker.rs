@@ -20,8 +20,8 @@
  * SOFTWARE.
  */
 
-use itertools::{traits, Itertools};
-use ndarray::{prelude::*, IxDynImpl};
+use itertools::Itertools;
+use ndarray::prelude::*;
 use teenygrad::shape::shapetracker::{NodeOrInt, ShapeTracker, View};
 
 struct CheckingShapeTracker<T> {
@@ -151,17 +151,25 @@ fn test_reshape_doesnt_multiview() {
     //     self.st.reshape((128, 2, 256, 2, 2, 2, 2, 2, 256, 8, 2))
     //     assert len(self.st.views) == 1
 
-    // let mut st = ShapeTracker::with_views(
-    //     vec![View::new(
-    //         &[256, 256, 2, 2, 2, 2, 2, 256, 8, 2],
-    //         Some(&[0, 8, 0, 4, 0, 0, 2, 16384, 2048, 1]),
-    //         0,
-    //         None,
-    //     )]
-    //     .as_ref(),
-    // );
-    // st.reshape(&[128, 2, 256, 2, 2, 2, 2, 2, 256, 8, 2]);
-    // assert_eq!(st.views.len(), 1);
+    let mut st = ShapeTracker::with_views(
+        vec![View::new(
+            &[256, 256, 2, 2, 2, 2, 2, 256, 8, 2]
+                .iter()
+                .map(|x| NodeOrInt::Int(*x as isize))
+                .collect_vec(),
+            Some(&[0, 8, 0, 4, 0, 0, 2, 16384, 2048, 1]),
+            0,
+            None,
+        )]
+        .as_ref(),
+    );
+    st.reshape(
+        &mut [128, 2, 256, 2, 2, 2, 2, 2, 256, 8, 2]
+            .iter()
+            .map(|x| NodeOrInt::Int(*x as isize))
+            .collect_vec(),
+    );
+    assert_eq!(st.views.len(), 1);
 }
 
 // class TestRealDoesntSimplify(unittest.TestCase):
