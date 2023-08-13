@@ -149,11 +149,6 @@ impl CheckingShapeTracker<f32> {
 
 #[test]
 fn test_reshape_doesnt_multiview() {
-    //   def test_reshape_doesnt_multiview(self):
-    //     self.st = ShapeTracker((256, 256, 2, 2, 2, 2, 2, 256, 8, 2), views=[View((256, 256, 2, 2, 2, 2, 2, 256, 8, 2), (0, 8, 0, 4, 0, 0, 2, 16384, 2048, 1), 0, None)])
-    //     self.st.reshape((128, 2, 256, 2, 2, 2, 2, 2, 256, 8, 2))
-    //     assert len(self.st.views) == 1
-
     let mut st = ShapeTracker::with_views(
         vec![View::new(
             &[256, 256, 2, 2, 2, 2, 2, 256, 8, 2]
@@ -183,30 +178,16 @@ fn test_reshape_doesnt_multiview() {
     );
 }
 
-// class TestRealDoesntSimplify(unittest.TestCase):
-//   def tearDown(self):
-//     st = self.st.real_strides()
-//     print(st)
-//     self.st.simplify()
-//     assert len(self.st.views) != 1
-//     assert None in st
-
 fn test_real_doesnt_simplify_check(st: &mut ShapeTracker) {
     let strides = st.real_strides(false);
     st.simplify();
 
-    assert_eq!(st.views.len(), 1);
+    assert_ne!(st.views.len(), 1);
     assert!(strides.contains(&None));
 }
 
 #[test]
 fn test_real_doesnt_simplify_1() {
-    //   def test_1(self):
-    //     self.st = ShapeTracker((8, 6, 11), views=[
-    //       View((8, 3, 1, 2, 11, 1), (33, 11, 0, 0, 1, 0), 0, None),
-    //       View((8, 6, 11), (66, 11, 1), 0, None)])
-    //     assert self.st.real_strides() == (33, None, 1)
-
     let mut st = ShapeTracker::with_views(
         vec![
             View::new(
@@ -230,6 +211,7 @@ fn test_real_doesnt_simplify_1() {
         ]
         .as_ref(),
     );
+
     assert_eq!(
         st.real_strides(false),
         vec![Some(Node::new_num(33)), None, Some(Node::new_num(1))]
@@ -246,7 +228,41 @@ fn test_real_doesnt_simplify_2() {
     //       View((4, 4, 3, 3), (36, 9, 3, 1), 0, None)])
     //     assert self.st.real_strides() == (None, 18, -3, -1)
 
-    todo!()
+    let mut st = ShapeTracker::with_views(
+        vec![
+            View::new(
+                &[2, 2, 4, 3, 3]
+                    .iter()
+                    .map(|x| NodeOrInt::Int(*x as isize))
+                    .collect_vec(),
+                Some(&[72, 9, 18, -3, -1]),
+                8,
+                None,
+            ),
+            View::new(
+                &[4, 4, 3, 3]
+                    .iter()
+                    .map(|x| NodeOrInt::Int(*x as isize))
+                    .collect_vec(),
+                Some(&[36, 9, 3, 1]),
+                0,
+                None,
+            ),
+        ]
+        .as_ref(),
+    );
+
+    assert_eq!(
+        st.real_strides(false),
+        vec![
+            None,
+            Some(Node::new_num(18)),
+            Some(Node::new_num(-3)),
+            Some(Node::new_num(1))
+        ]
+    );
+
+    test_real_doesnt_simplify_check(&mut st);
 }
 
 // class TestRealStrides(unittest.TestCase):
