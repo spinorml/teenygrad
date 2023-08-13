@@ -20,25 +20,14 @@
  * SOFTWARE.
  */
 
-pub mod add;
-pub mod ands;
-pub mod factorize;
-pub mod floordiv;
-pub mod ge;
-pub mod lt;
-pub mod modulus;
-pub mod mul;
-pub mod neg;
-pub mod sub;
-pub mod sum;
-pub mod vars;
-
 use std::{
+    collections::BTreeMap,
     fmt::{Debug, Display},
     hash::Hash,
+    ops,
 };
 
-use crate::shape::symbolic::factorize::factorize;
+use crate::helpers::{gcd, partition};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeAttrs {
@@ -427,5 +416,463 @@ impl Node {
         attrs.min = bounds.0;
         attrs.max = bounds.1;
         self
+    }
+}
+
+/*------------------------------------------*
+|  Add
+*-------------------------------------------*/
+
+impl ops::Add<isize> for Node {
+    type Output = Node;
+
+    fn add(self, rhs: isize) -> Self::Output {
+        Node::new_sum(&[self, Node::new_num(rhs)])
+    }
+}
+
+impl ops::Add<Node> for Node {
+    type Output = Node;
+
+    fn add(self, rhs: Node) -> Self::Output {
+        if let Node::Num { attrs } = &rhs {
+            if attrs.b == 0 {
+                return self;
+            }
+        }
+
+        Node::new_sum(&[self, rhs])
+    }
+}
+
+/*------------------------------------------*
+|  Ands
+*-------------------------------------------*/
+
+pub fn ands(_nodes: &[Node]) -> Node {
+    // @staticmethod
+    // def ands(nodes:List[Node]) -> Node:
+    //   if not nodes: return NumNode(1)
+    //   if len(nodes) == 1: return nodes[0]
+    //   if any(x.min == x.max == 0 for x in nodes): return NumNode(0)
+
+    //   # filter 1s
+    //   nodes = [x for x in nodes if x.min != x.max]
+    //   return create_rednode(AndNode, nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
+    todo!()
+}
+
+/*------------------------------------------*
+|  Factorize
+*-------------------------------------------*/
+
+pub fn factorize(nodes: &[Node]) -> Vec<Node> {
+    let mut mul_groups = BTreeMap::<&Node, isize>::new();
+    for x in nodes.iter() {
+        let (a, b) = match x {
+            Node::Mult { a, attrs } => (a.as_ref(), attrs.b),
+            _ => (x, 1),
+        };
+        mul_groups.insert(a, mul_groups.get(a).unwrap_or(&0) + b);
+    }
+
+    mul_groups
+        .iter()
+        .filter(|group| *group.1 != 0)
+        .map(|group| {
+            if *group.1 != 1 {
+                Node::new_mult((**group.0).clone(), *group.1)
+            } else {
+                (**group.0).clone()
+            }
+        })
+        .collect()
+}
+
+/*------------------------------------------*
+|  Floordiv
+*-------------------------------------------*/
+
+impl Node {
+    pub fn floordiv(self, b: isize, factoring_allowed: Option<bool>) -> Node {
+        match &self {
+            Node::Var { .. } => node_floordiv(self.clone(), b, factoring_allowed),
+            Node::Num { .. } => node_floordiv(self.clone(), b, factoring_allowed),
+            Node::LessThan { a, attrs } => lt_floordiv((**a).clone(), b, attrs),
+            Node::Mult { a, attrs, .. } => mult_floordiv(self.clone(), (**a).clone(), b, attrs),
+            Node::Div { a, attrs } => div_floordiv((**a).clone(), b, attrs),
+            Node::Mod { a, attrs } => mod_floordiv((**a).clone(), b, attrs),
+            Node::Sum { .. } => sum_floordiv(self.clone(), b, factoring_allowed),
+            Node::And { nodes, .. } => and_floordiv(nodes, b),
+        }
+    }
+}
+
+fn node_floordiv(node: Node, b: isize, factoring_allowed: Option<bool>) -> Node {
+    debug_assert!(b != 0);
+
+    if b < 0 {
+        return node.floordiv(-b, factoring_allowed) * -1;
+    }
+
+    if b == 1 {
+        return node;
+    }
+
+    let (min, _) = node.min_max();
+    if min < 0 {
+        let offset = (min as f32 / b as f32).floor() as isize;
+
+        (node + (-offset * b)).floordiv(b, Some(false)) + offset
+    } else {
+        Node::new_node(Node::new_div(node, b))
+    }
+}
+
+fn lt_floordiv(a: Node, b: isize, attrs: &NodeAttrs) -> Node {
+    a.floordiv(b, None).lt(attrs.b / b)
+}
+
+fn mult_floordiv(node: Node, a: Node, b: isize, attrs: &NodeAttrs) -> Node {
+    if attrs.b % b == 0 {
+        a * (attrs.b / b)
+    } else if (b % attrs.b == 0) && (attrs.b > 0) {
+        a.floordiv(b / attrs.b, None)
+    } else {
+        node_floordiv(node, b, None)
+    }
+}
+
+fn div_floordiv(node: Node, b: isize, attrs: &NodeAttrs) -> Node {
+    node.floordiv(attrs.b * b, None)
+}
+
+fn mod_floordiv(node: Node, b: isize, attrs: &NodeAttrs) -> Node {
+    if attrs.b % b == 0 {
+        node.floordiv(b, None).modulus(attrs.b / b)
+    } else {
+        node_floordiv(node, b, None)
+    }
+}
+
+fn sum_floordiv(node: Node, b: isize, factoring_allowed: Option<bool>) -> Node {
+    if b == 1 {
+        return node.to_owned();
+    }
+
+    if !factoring_allowed.unwrap_or(true) {
+        return node_floordiv(node, b, factoring_allowed);
+    }
+
+    let mut fully_divided: Vec<Node> = vec![];
+    let mut rest: Vec<Node> = vec![];
+    let mut _gcd = b;
+    let mut divisor = 1;
+
+    for x in node.flat_components() {
+        match x {
+            Node::Num { attrs } | Node::Mult { attrs, .. } => {
+                if attrs.b % b == 0 {
+                    fully_divided.push(x.clone().floordiv(b, None))
+                } else {
+                    rest.push(x.clone());
+                    _gcd = gcd(_gcd, attrs.b);
+                    if matches!(x, Node::Mult { .. }) && divisor == 1 && b % attrs.b == 0 {
+                        divisor = attrs.b
+                    }
+                }
+            }
+            _ => {
+                rest.push(x.clone());
+                _gcd = 1;
+            }
+        }
+    }
+
+    if _gcd > 1 {
+        sum(&fully_divided) + sum(&rest).floordiv(_gcd, None).floordiv(b / _gcd, None)
+    } else if divisor > 1 {
+        sum(&fully_divided)
+            + sum(&rest)
+                .floordiv(divisor, None)
+                .floordiv(b / divisor, None)
+    } else {
+        let rest_sum = sum(&rest);
+        sum(&fully_divided) + node_floordiv(rest_sum.clone(), b, None)
+    }
+}
+
+fn and_floordiv(nodes: &[Node], b: isize) -> Node {
+    let x: Vec<Node> = nodes.iter().map(|x| x.clone().floordiv(b, None)).collect();
+
+    Node::new_ands(&x)
+}
+
+/*------------------------------------------*
+|  GE
+*-------------------------------------------*/
+
+impl Node {
+    pub fn ge(self, b: isize) -> Node {
+        (-self).lt(-b + 1)
+    }
+}
+
+/*------------------------------------------*
+|  LT
+*-------------------------------------------*/
+
+impl Node {
+    pub fn lt(self, b: isize) -> Node {
+        let mut lhs = None;
+        if let Node::Sum { nodes, .. } = &self {
+            lhs = sum_lt(nodes, b);
+        }
+
+        Node::new_node(Node::new_lt(lhs.unwrap_or(self), b))
+    }
+}
+
+fn sum_lt(nodes: &[Node], b: isize) -> Option<Node> {
+    fn get_mult_value(node: &Node) -> Option<isize> {
+        match node {
+            Node::Mult { attrs, .. } => Some(attrs.b),
+            _ => None,
+        }
+    }
+    fn compute_gcd(a: isize, node: &Node) -> isize {
+        gcd(a, get_mult_value(node).unwrap())
+    }
+
+    let (muls, others) = partition(nodes, |node: &Node| -> bool {
+        if let Node::Mult { ref attrs, .. } = node {
+            attrs.b > 0 && attrs.max >= b
+        } else {
+            false
+        }
+    });
+    if !muls.is_empty() {
+        let mut mul_gcd = get_mult_value(muls.get(0).unwrap()).unwrap();
+        mul_gcd = muls[1..]
+            .iter()
+            .fold(mul_gcd, |acc: isize, node| compute_gcd(acc, node));
+        if b % mul_gcd == 0 {
+            let others_owned: Vec<Node> = others.iter().map(|n| (**n).clone()).collect();
+            let all_others = sum(&others_owned);
+            let (min, max) = all_others.min_max();
+            if min >= 0 && max < mul_gcd {
+                let muls_owned: Vec<Node> = muls.iter().map(|n| (**n).clone()).collect();
+                Some(sum(&muls_owned))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+/*------------------------------------------*
+|  Modulus
+*-------------------------------------------*/
+
+impl Node {
+    pub fn modulus(&self, b: isize) -> Node {
+        match self {
+            Node::Mult { a, attrs, .. } => mod_mult(a, b, attrs),
+            Node::Sum { nodes, .. } => mod_sum(nodes, b),
+            _ => mod_node(self, b),
+        }
+    }
+}
+
+fn mod_node(node: &Node, b: isize) -> Node {
+    debug_assert!(b > 0);
+
+    if b == 1 {
+        return Node::new_num(0);
+    }
+
+    let (min, max) = node.min_max();
+    if min >= 0 && max < b {
+        return node.clone();
+    }
+
+    if min < 0 {
+        let x = (min as f32 / b as f32).floor() * b as f32;
+        return (node.clone() - x as isize).modulus(b);
+    }
+
+    Node::new_mod(node.clone(), b)
+}
+
+fn mod_mult(a: &Node, b: isize, attrs: &NodeAttrs) -> Node {
+    let a = a.clone() * (attrs.b % b);
+    mod_node(&a, b)
+}
+
+fn mod_sum(nodes: &[Node], b: isize) -> Node {
+    let mut new_nodes: Vec<Node> = vec![];
+
+    for x in nodes {
+        match x {
+            Node::Num { attrs } => {
+                new_nodes.push(Node::new_num(attrs.b % b));
+            }
+            Node::Mult { a, attrs } => {
+                new_nodes.push(*a.clone() * (attrs.b % b));
+            }
+            _ => {
+                new_nodes.push(x.clone());
+            }
+        }
+    }
+
+    mod_node(&sum(&new_nodes), b)
+}
+
+/*------------------------------------------*
+|  Mul
+*-------------------------------------------*/
+
+impl ops::Mul<isize> for Node {
+    type Output = Node;
+    fn mul(self, b: isize) -> Self::Output {
+        match self.clone() {
+            Node::LessThan { a, attrs } => (*a * b).lt(attrs.b * b),
+            Node::Mult { a, attrs } => *a * (attrs.b * b),
+            Node::Sum { nodes, .. } => {
+                let _nodes: Vec<Node> = nodes.iter().map(|node| node.clone() * b).collect();
+                sum(&_nodes)
+            }
+            Node::And { nodes, .. } => {
+                let _nodes: Vec<Node> = nodes.iter().map(|node| node.clone() * b).collect();
+                ands(&_nodes)
+            }
+            _ => match b {
+                0 => Node::new_num(0),
+                1 => self,
+                _ => Node::new_mult(self, b),
+            },
+        }
+    }
+}
+
+/*------------------------------------------*
+|  Neg
+*-------------------------------------------*/
+
+impl ops::Neg for Node {
+    type Output = Node;
+
+    fn neg(self) -> Self::Output {
+        self * -1
+    }
+}
+
+/*------------------------------------------*
+|  Sub
+*-------------------------------------------*/
+
+impl ops::Sub<isize> for Node {
+    type Output = Node;
+
+    fn sub(self, rhs: isize) -> Self::Output {
+        self + (-rhs)
+    }
+}
+
+impl ops::Sub<Node> for Node {
+    type Output = Node;
+
+    fn sub(self, rhs: Node) -> Self::Output {
+        self + (-rhs)
+    }
+}
+
+/*------------------------------------------*
+|  Sum
+*-------------------------------------------*/
+
+pub fn sum(nodes: &[Node]) -> Node {
+    fn flat_components(nodes: &[Node]) -> Vec<Node> {
+        let mut new_nodes = vec![];
+        for node in nodes.iter() {
+            if let Node::Sum { nodes, .. } = node {
+                new_nodes.extend(flat_components(&nodes[..]));
+            }
+        }
+        new_nodes
+    }
+
+    let all_nodes: Vec<&Node> = nodes
+        .iter()
+        .filter(|node| {
+            let (min, max) = node.min_max();
+            (min != 0) || (max != 0)
+        })
+        .collect();
+    let mut node_sum: isize = 0;
+    let mut new_nodes: Vec<Node> = vec![];
+
+    if all_nodes.is_empty() {
+        return Node::new_num(0);
+    }
+
+    for node in all_nodes {
+        match node {
+            Node::Num { attrs } => node_sum += attrs.b,
+            Node::Sum { nodes, .. } => {
+                let sub_nodes = flat_components(nodes);
+                for sub_node in sub_nodes.iter() {
+                    if let Node::Num { attrs } = sub_node {
+                        node_sum += attrs.b;
+                    } else {
+                        new_nodes.push(sub_node.clone());
+                    }
+                }
+            }
+            _ => new_nodes.push((*node).clone()),
+        }
+
+        let num_mult_nodes = new_nodes
+            .iter()
+            .filter(|node| matches!(node, Node::Mult { .. }))
+            .count();
+
+        if num_mult_nodes < new_nodes.len() {
+            new_nodes = factorize(&new_nodes[..]);
+        }
+    }
+
+    if node_sum != 0 {
+        new_nodes.push(Node::new_num(node_sum));
+    }
+
+    match new_nodes.len() {
+        0 => Node::new_num(0),
+        1 => new_nodes.get(0).unwrap().clone(),
+        _ => Node::new_sum(&new_nodes),
+    }
+}
+
+/*------------------------------------------*
+|  Vars
+*-------------------------------------------*/
+
+impl Node {
+    pub fn vars(&self) -> Vec<&Node> {
+        match self {
+            Node::Var { .. } => vec![self],
+            Node::LessThan { a, .. } => a.vars(),
+            Node::Num { .. } => vec![],
+            Node::Mult { a, .. } => a.vars(),
+            Node::Div { a, .. } => a.vars(),
+            Node::Mod { a, .. } => a.vars(),
+            Node::Sum { nodes, .. } => nodes.iter().flat_map(|node| node.vars()).collect(),
+            Node::And { nodes, .. } => nodes.iter().flat_map(|node| node.vars()).collect(),
+        }
     }
 }

@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+use core::panic;
 use itertools::{izip, Itertools};
 use std::{
     cmp::{max, min, Ordering},
@@ -245,14 +246,26 @@ pub fn merge_views(vm2: &View, vm1: &View) -> Option<View> {
         return None;
     }
 
-    // let mst = ShapeTracker::new(&vm1.shape, &[vm2, vm1]);
-    // let strides = mst.real_strides();
-    // if strides.contains(&None) {
-    //     return None;
-    // }
+    let mst = ShapeTracker::with_views(&[vm2.clone(), vm1.clone()]);
+    let strides = mst.real_strides(false);
+    if strides.iter().any(|x| x.is_none()) {
+        return None;
+    }
 
-    // View::new(&vm1.shape, strides, ms.real_offset, vm1.mask)
-    todo!()
+    let strides = strides
+        .iter()
+        .map(|x| match x {
+            Some(Node::Num { attrs }) => attrs.b,
+            _ => panic!("Unexpected stride node type"),
+        })
+        .collect::<Vec<_>>();
+
+    Some(View::new(
+        &vm1.shape,
+        Some(&strides),
+        mst.real_offset(),
+        vm1.mask.as_deref(),
+    ))
 }
 
 fn _reshape(view: &View, new_shape: &[NodeOrInt]) -> (View, bool) {
@@ -418,22 +431,6 @@ impl ShapeTracker {
         }
     }
 
-    //   # NOTE: if a stride is not always valid, it will be None
-    //   def real_strides(self, ignore_valid=False) -> Tuple[Optional[Union[Node, int]], ...]:
-    //     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
-    //     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-    //     idx, valid = self.expr_idxs(idxs)
-    //     ret: List[Optional[Union[Node, int]]] = [None] * len(self.views[-1].shape)
-    //     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
-    //       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
-    //         ret[idxs.index(this_dim.a)] = this_dim.b
-    //       elif isinstance(this_dim, Variable):
-    //         ret[idxs.index(this_dim)] = 1
-    //     idx_vars, valid_vars = idx.vars(), valid.vars()
-    //     for i,tidx in enumerate(idxs):
-    //       if tidx in valid_vars and not ignore_valid: ret[i] = None
-    //       elif tidx not in idx_vars: ret[i] = 0
-    //     return tuple(ret)
     pub fn real_strides(&self, ignore_valid: bool) -> Vec<Option<Node>> {
         if self.views.len() == 1 && self.views.last().unwrap().mask.is_none() {
             return self
@@ -449,24 +446,37 @@ impl ShapeTracker {
         let idxs = (0..self.shape().len())
             .map(|i| Node::new_var(&format!("idx{}", i), 0, self.shape()[i].as_int() - 1))
             .collect::<Vec<Node>>();
-        let (idx, _) = self.expr_idxs(Some(&idxs));
-        let ret: Vec<Option<Node>> = vec![None; self.views.last().unwrap().shape.len()];
-        let nodes = match idx {
+        let (idx, valid) = self.expr_idxs(Some(&idxs));
+        let mut ret: Vec<Option<Node>> = vec![None; self.views.last().unwrap().shape.len()];
+        let tmp = vec![idx.clone()];
+        let nodes = match &idx {
             Node::Sum { nodes, .. } => nodes,
-            _ => vec![idx],
+            _ => &tmp,
         };
 
         for this_dim in nodes {
-            //       if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable):
-            //         ret[idxs.index(this_dim.a)] = this_dim.b
-            //       elif isinstance(this_dim, Variable):
-            //         ret[idxs.index(this_dim)] = 1
+            match this_dim {
+                Node::Mult { a, attrs } => {
+                    if let Node::Var { .. } = **a {
+                        ret[idxs.iter().position(|x| *x == **a).unwrap()] =
+                            Some(Node::new_num(attrs.b));
+                    }
+                }
+                Node::Var { .. } => {
+                    ret[idxs.iter().position(|x| *x == *this_dim).unwrap()] =
+                        Some(Node::new_num(1));
+                }
+                _ => (),
+            }
         }
 
-        // let (idx_vars, valid_vars) = (idx.vars(), valid.vars());
+        let (idx_vars, valid_vars) = (idx.vars(), valid.vars());
         for (i, tidx) in idxs.iter().enumerate() {
-            //       if tidx in valid_vars and not ignore_valid: ret[i] = None
-            //       elif tidx not in idx_vars: ret[i] = 0
+            if valid_vars.iter().any(|x| *x == tidx) && !ignore_valid {
+                ret[i] = None;
+            } else if !idx_vars.iter().any(|x| *x == tidx) {
+                ret[i] = Some(Node::new_num(0));
+            }
         }
 
         ret
@@ -498,12 +508,13 @@ impl ShapeTracker {
     //         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
     //         self.views = self.views[:-2] + [new_view]
     //         self.simplify()
-    pub fn simplify(&mut self) -> Vec<Option<NodeOrInt>> {
+    pub fn simplify(&mut self) {
         if self.views.len() >= 2 {
             let new_view = merge_views(
                 self.views.get(self.views.len() - 2).unwrap(),
                 self.views.last().unwrap(),
             );
+
             if let Some(new_view) = new_view {
                 log::debug!(
                     "st simplify : {:?} + {:?} = {:?}",
@@ -517,7 +528,6 @@ impl ShapeTracker {
                 self.simplify();
             }
         }
-        todo!()
     }
 
     pub fn expr_idxs(&self, idxs: Option<&[Node]>) -> (Node, Node) {
