@@ -77,6 +77,12 @@ impl NodeOrInt {
     }
 }
 
+impl From<isize> for NodeOrInt {
+    fn from(i: isize) -> Self {
+        NodeOrInt::Int(i)
+    }
+}
+
 pub fn to_shape_strides(shape: &[NodeOrInt], strides: &[isize]) -> Vec<(isize, isize)> {
     debug_assert!(shape.len() == strides.len());
     let mut result: Vec<(isize, isize)> = Vec::new();
@@ -210,7 +216,6 @@ impl View {
                 result.push(idx.clone().mul(*st));
             }
         }
-        println!("expr_idxs result: {:?}", result);
 
         Node::new_sum(result.as_ref())
     }
@@ -447,21 +452,15 @@ impl ShapeTracker {
         let idxs = (0..self.shape().len())
             .map(|i| Node::new_var(&format!("idx{}", i), 0, self.shape()[i].as_int() - 1))
             .collect::<Vec<Node>>();
-        println!("idxs: {:?}", idxs);
 
         let (idx, valid) = self.expr_idxs(Some(&idxs));
-        println!("idx: {:?}", idx);
-        println!("valid: {:?}", valid);
-
         let mut ret: Vec<Option<Node>> = vec![None; self.views.last().unwrap().shape.len()];
-        println!("ret: {:?}", ret);
 
         let tmp = vec![idx.clone()];
         let nodes = match &idx {
             Node::Sum { nodes, .. } => nodes,
             _ => &tmp,
         };
-        println!("nodes: {:?}", nodes);
 
         for this_dim in nodes {
             match this_dim {
@@ -480,9 +479,6 @@ impl ShapeTracker {
         }
 
         let (idx_vars, valid_vars) = (idx.vars(), valid.vars());
-        println!("idx_vars: {:?}", idx_vars);
-        println!("valid_vars: {:?}", valid_vars);
-
         for (i, tidx) in idxs.iter().enumerate() {
             if valid_vars.iter().any(|x| *x == tidx) && !ignore_valid {
                 ret[i] = None;
@@ -491,7 +487,6 @@ impl ShapeTracker {
             }
         }
 
-        println!("ret: {:?}", ret);
         ret
     }
 

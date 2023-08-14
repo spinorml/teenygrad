@@ -222,12 +222,6 @@ fn test_real_doesnt_simplify_1() {
 
 #[test]
 fn test_real_doesnt_simplify_2() {
-    //   def test_2(self):
-    //     self.st = ShapeTracker((4, 4, 3, 3), views=[
-    //       View((2, 2, 4, 3, 3), (72, 9, 18, -3, -1), 8, None),
-    //       View((4, 4, 3, 3), (36, 9, 3, 1), 0, None)])
-    //     assert self.st.real_strides() == (None, 18, -3, -1)
-
     let mut st = ShapeTracker::with_views(
         vec![
             View::new(
@@ -258,25 +252,33 @@ fn test_real_doesnt_simplify_2() {
             None,
             Some(Node::new_num(18)),
             Some(Node::new_num(-3)),
-            Some(Node::new_num(1))
+            Some(Node::new_num(-1))
         ]
     );
 
     test_real_doesnt_simplify_check(&mut st);
 }
 
-// class TestRealStrides(unittest.TestCase):
 #[test]
 fn test_real_strides_1() {
-    //   def test_1(self):
-    //     self.st = ShapeTracker((16, 32, 4), views=[
-    //       View((2048,), (1,), 0, ((0, 512),)),
-    //       View((16, 32, 4), (128, 4, 1), 0, None)])
-    //     st = self.st.real_strides()
-    //     print(self.st, st)
-    //     assert st == (None, 4, 1)
+    let st = ShapeTracker::with_views(
+        vec![
+            View::new(&[2048.into()], Some(&[1]), 0, Some(&[(0, 512)])),
+            View::new(
+                &[16.into(), 32.into(), 4.into()],
+                Some(&[128, 4, 1]),
+                0,
+                None,
+            ),
+        ]
+        .as_ref(),
+    );
 
-    todo!()
+    let strides = st.real_strides(false);
+    assert_eq!(
+        strides,
+        vec![None, Some(Node::new_num(4)), Some(Node::new_num(1))]
+    );
 }
 
 // class TestRealSimplifies(unittest.TestCase):
