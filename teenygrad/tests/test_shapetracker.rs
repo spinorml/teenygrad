@@ -261,7 +261,7 @@ fn test_real_doesnt_simplify_2() {
 
 #[test]
 fn test_real_strides_1() {
-    let st = ShapeTracker::with_views(
+    let mut st = ShapeTracker::with_views(
         vec![
             View::new(&[2048.into()], Some(&[1]), 0, Some(&[(0, 512)])),
             View::new(
@@ -279,6 +279,8 @@ fn test_real_strides_1() {
         strides,
         vec![None, Some(Node::new_num(4)), Some(Node::new_num(1))]
     );
+
+    test_real_doesnt_simplify_check(&mut st);
 }
 
 // class TestRealSimplifies(unittest.TestCase):
@@ -289,14 +291,47 @@ fn test_real_strides_1() {
 //     print(self.st.views[-1].strides, st)
 //     assert self.st.views[-1].strides == st
 
+fn test_real_simplifies_check(st: &mut ShapeTracker) {
+    let strides = st.real_strides(false);
+    st.simplify();
+
+    assert_eq!(st.views.len(), 1);
+    assert_eq!(
+        st.views.last().unwrap().strides,
+        strides
+            .iter()
+            .map(|x| x.as_ref().unwrap().num_val().unwrap())
+            .collect_vec()
+    );
+}
+
 #[test]
 fn test_real_simplifies_1() {
-    //   def test_1(self):
-    //     self.st = ShapeTracker((1, 3, 2, 11, 26, 1, 1, 3), views=[
-    //       View((1, 3, 2, 11, 4, 28), (0, 308, 0, 28, 0, 1), 0, None),
-    //       View((1, 3, 2, 11, 26, 1, 1, 3), (0, 2464, 0, 112, 1, 0, 0, 29), 0, None)])
+    let mut st = ShapeTracker::with_views(&[
+        View::new(
+            &[1.into(), 3.into(), 2.into(), 11.into(), 4.into(), 28.into()],
+            Some(&[0, 308, 0, 28, 0, 1]),
+            0,
+            None,
+        ),
+        View::new(
+            &[
+                1.into(),
+                3.into(),
+                2.into(),
+                11.into(),
+                26.into(),
+                1.into(),
+                1.into(),
+                3.into(),
+            ],
+            Some(&[0, 2464, 0, 112, 1, 0, 0, 29]),
+            0,
+            None,
+        ),
+    ]);
 
-    todo!()
+    test_real_simplifies_check(&mut st);
 }
 
 #[test]
@@ -305,8 +340,31 @@ fn test_real_simplifies_2() {
     //     self.st = ShapeTracker((8, 1, 6, 10, 28, 3, 2, 1), views=[
     //       View((8, 3, 3, 11, 2, 28), (924, 308, 0, 28, 0, 1), 0, None),
     //       View((8, 1, 6, 10, 28, 3, 2, 1), (5544, 0, 0, 56, 1, 1848, 672, 0), 0, None)])
+    let mut st = ShapeTracker::with_views(&[
+        View::new(
+            &[8.into(), 3.into(), 3.into(), 11.into(), 2.into(), 28.into()],
+            Some(&[924, 308, 0, 28, 0, 1]),
+            0,
+            None,
+        ),
+        View::new(
+            &[
+                8.into(),
+                1.into(),
+                6.into(),
+                10.into(),
+                28.into(),
+                3.into(),
+                2.into(),
+                1.into(),
+            ],
+            Some(&[5544, 0, 0, 56, 1, 1848, 672, 0]),
+            0,
+            None,
+        ),
+    ]);
 
-    todo!()
+    test_real_simplifies_check(&mut st);
 }
 
 // class TestSimplifyingShapeTracker(unittest.TestCase):
@@ -331,7 +389,18 @@ fn test_expand_contract_simple() {
     //     print(self.st.views)
     //     assert(len(self.st.views) == 1)
 
-    todo!()
+    let mut st = CheckingShapeTracker::new(&[1.into(), 10.into()]);
+
+    st.expand(&mut [10.into(), 10.into()]);
+    st.reshape(&mut [100.into()]);
+    assert_eq!(st.views().len(), 2);
+
+    st.reshape(&mut [10.into(), 10.into()]);
+    st.simplify();
+    assert_eq!(st.views().len(), 1);
+
+    // Teardown
+    st.assert_same();
 }
 
 //   # multiview simplify

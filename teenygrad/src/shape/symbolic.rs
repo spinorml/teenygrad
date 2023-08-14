@@ -159,7 +159,7 @@ impl Node {
     }
 
     pub fn new_var(expr: &str, min: isize, max: isize) -> Node {
-        // debug_assert!(min >= 0 && min <= max);
+        debug_assert!(min >= 0 && min <= max);
 
         if min == max {
             Node::new_num(min)
@@ -340,6 +340,13 @@ impl Node {
             Node::Mod { attrs, .. } => attrs,
             Node::Sum { attrs, .. } => attrs,
             Node::And { attrs, .. } => attrs,
+        }
+    }
+
+    pub fn num_val(&self) -> Option<isize> {
+        match self {
+            Node::Num { attrs } => Some(attrs.b),
+            _ => None,
         }
     }
 
