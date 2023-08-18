@@ -20,6 +20,44 @@
  * SOFTWARE.
  */
 
-pub mod shapetracker;
-pub mod symbolic;
-pub mod symbolic1;
+use std::{fmt::Debug, fmt::Display, hash::Hash, ops::*};
+
+pub enum NodeOrInt {
+    Node(Box<dyn Node>),
+    Int(isize),
+}
+pub trait Node {
+    fn b(&self) -> NodeOrInt;
+    fn min(&self) -> isize;
+    fn max(&self) -> isize;
+
+    fn display(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+
+    fn debug(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+
+    fn clone(&self) -> Box<dyn Node>;
+
+    fn vars(&self) -> Vec<&dyn Node> {
+        vec![]
+    }
+
+    fn add(&self, other: NodeOrInt) -> Box<dyn Node> {
+        todo!()
+    }
+
+    fn neg(&self) -> Box<dyn Node> {
+        todo!()
+    }
+
+    fn radd(&self, other: isize) -> Box<dyn Node> {
+        self.add(NodeOrInt::Int(other))
+    }
+
+    fn sub(&self, other: NodeOrInt) -> Box<dyn Node> {
+        let neg_value = match other {
+            NodeOrInt::Node(other) => NodeOrInt::Node(other.neg()),
+            NodeOrInt::Int(other) => NodeOrInt::Int(-other),
+        };
+        self.add(neg_value)
+    }
+}

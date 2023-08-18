@@ -107,9 +107,11 @@ pub fn to_shape_strides(shape: &[NodeOrInt], strides: &[isize]) -> Vec<(isize, i
 
 pub fn is_contiguous(shape: &[NodeOrInt], strides: &[isize]) -> bool {
     debug_assert!(shape.len() == strides.len());
-
-    izip!(shape, strides, &strides_for_shape(shape))
-        .all(|(s, s1, s2)| *s1 == *s2 || s.as_int() == 1)
+    let sfs = strides_for_shape(shape);
+    println!("AXM: shape {:?}", shape);
+    println!("AXM: strides {:?}", strides);
+    println!("AXM: sfs {:?}", sfs);
+    izip!(shape, strides, &sfs).all(|(s, s1, s2)| *s1 == *s2 || s.as_int() == 1)
 }
 
 pub fn filter_strides(shape: &[NodeOrInt], strides: &[isize]) -> Vec<isize> {

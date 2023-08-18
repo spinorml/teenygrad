@@ -336,10 +336,6 @@ fn test_real_simplifies_1() {
 
 #[test]
 fn test_real_simplifies_2() {
-    //   def test_2(self):
-    //     self.st = ShapeTracker((8, 1, 6, 10, 28, 3, 2, 1), views=[
-    //       View((8, 3, 3, 11, 2, 28), (924, 308, 0, 28, 0, 1), 0, None),
-    //       View((8, 1, 6, 10, 28, 3, 2, 1), (5544, 0, 0, 56, 1, 1848, 672, 0), 0, None)])
     let mut st = ShapeTracker::with_views(&[
         View::new(
             &[8.into(), 3.into(), 3.into(), 11.into(), 2.into(), 28.into()],
