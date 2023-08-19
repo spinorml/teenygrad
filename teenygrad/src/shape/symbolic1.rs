@@ -20,44 +20,456 @@
  * SOFTWARE.
  */
 
-use std::{fmt::Debug, fmt::Display, hash::Hash, ops::*};
+use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
-pub enum NodeOrInt {
-    Node(Box<dyn Node>),
-    Int(isize),
-}
 pub trait Node {
-    fn b(&self) -> NodeOrInt;
+    fn expr(&self) -> &str {
+        panic!("Invalid node")
+    }
+
+    fn a(&self) -> &dyn Node {
+        panic!("Invalid node")
+    }
+
+    fn b(&self) -> &dyn Node {
+        panic!("Invalid node")
+    }
+
     fn min(&self) -> isize;
+
     fn max(&self) -> isize;
 
-    fn display(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+    fn intval(&self) -> isize {
+        panic!("Invalid node")
+    }
 
-    fn debug(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+    fn nodes(&self) -> Vec<&dyn Node> {
+        panic!("Invalid node")
+    }
+
+    fn render(&self, debug: bool, strip_parens: bool) -> String;
 
     fn clone(&self) -> Box<dyn Node>;
+
+    fn key(&self) -> String {
+        self.render(false, false)
+    }
+
+    fn hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::default();
+        hasher.write(self.key().as_bytes());
+        hasher.finish()
+    }
+
+    fn eq(&self, other: &dyn Node) -> bool {
+        self.key() == other.key()
+    }
+
+    fn as_bool(&self) -> bool {
+        !(self.min() == self.max() && self.min() == 0)
+    }
 
     fn vars(&self) -> Vec<&dyn Node> {
         vec![]
     }
 
-    fn add(&self, other: NodeOrInt) -> Box<dyn Node> {
-        todo!()
+    fn get_bounds(&self) -> (isize, isize) {
+        panic!("Invalid node")
+    }
+
+    fn flat_components(&self) -> Vec<&dyn Node> {
+        panic!("Invalid node")
     }
 
     fn neg(&self) -> Box<dyn Node> {
+        self.mul(num(-1).as_ref())
+    }
+
+    fn add(&self, other: &dyn Node) -> Box<dyn Node> {
+        let tmp1 = self.clone();
+
+        sum(&[tmp1.as_ref(), other])
+    }
+
+    fn sub(&self, other: &dyn Node) -> Box<dyn Node> {
+        self.add(other.neg().as_ref())
+    }
+
+    fn mul(&self, other: &dyn Node) -> Box<dyn Node> {
         todo!()
     }
 
-    fn radd(&self, other: isize) -> Box<dyn Node> {
-        self.add(NodeOrInt::Int(other))
+    fn floordiv(&self, other: &dyn Node, facatoring_allowed: Option<bool>) -> Box<dyn Node> {
+        todo!()
     }
 
-    fn sub(&self, other: NodeOrInt) -> Box<dyn Node> {
-        let neg_value = match other {
-            NodeOrInt::Node(other) => NodeOrInt::Node(other.neg()),
-            NodeOrInt::Int(other) => NodeOrInt::Int(-other),
+    fn modulus(&self, other: &dyn Node) -> Box<dyn Node> {
+        todo!()
+    }
+
+    fn le(&self, other: &dyn Node) -> Box<dyn Node> {
+        self.lt(other.add(num(1).as_ref()).as_ref())
+    }
+
+    fn gt(&self, other: &dyn Node) -> Box<dyn Node> {
+        self.neg().le(other.neg().as_ref())
+    }
+
+    fn ge(&self, other: &dyn Node) -> Box<dyn Node> {
+        self.neg().lt(other.neg().add(num(1).as_ref()).as_ref())
+    }
+
+    fn lt(&self, other: &dyn Node) -> Box<dyn Node> {
+        todo!()
+    }
+}
+
+/*------------------------------------------------------*
+| Utility functions
+*-------------------------------------------------------*/
+
+pub fn num(value: isize) -> Box<dyn Node> {
+    NumNode::new(value)
+}
+
+pub fn factorize(_nodes: &[&dyn Node]) -> Box<dyn Node> {
+    todo!()
+}
+
+pub fn sum(_nodes: &[&dyn Node]) -> Box<dyn Node> {
+    todo!()
+}
+
+pub fn ands(_nodes: &[&dyn Node]) -> Box<dyn Node> {
+    todo!()
+}
+
+pub fn create_node(node: &dyn Node) -> Box<dyn Node> {
+    if node.min() == node.max() {
+        num(node.min())
+    } else {
+        node.clone()
+    }
+}
+
+/*------------------------------------------------------*
+| Variable
+*-------------------------------------------------------*/
+pub struct Var {
+    expr: String,
+    min: isize,
+    max: isize,
+}
+
+impl Node for Var {
+    fn expr(&self) -> &str {
+        &self.expr
+    }
+
+    fn min(&self) -> isize {
+        self.min
+    }
+
+    fn max(&self) -> isize {
+        self.max
+    }
+
+    fn render(&self, debug: bool, strip_parens: bool) -> String {
+        todo!()
+    }
+
+    fn clone(&self) -> Box<dyn Node> {
+        Box::new(Var {
+            expr: self.expr.clone(),
+            min: self.min,
+            max: self.max,
+        })
+    }
+
+    fn vars(&self) -> Vec<&dyn Node> {
+        vec![self]
+    }
+}
+
+/*------------------------------------------------------*
+| Num
+*-------------------------------------------------------*/
+pub struct NumNode {
+    value: isize,
+}
+
+impl NumNode {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(value: isize) -> Box<dyn Node> {
+        Box::new(NumNode { value })
+    }
+}
+
+impl Node for NumNode {
+    fn min(&self) -> isize {
+        self.value
+    }
+
+    fn max(&self) -> isize {
+        self.value
+    }
+
+    fn intval(&self) -> isize {
+        self.value
+    }
+
+    fn render(&self, _debug: bool, _strip_parens: bool) -> String {
+        self.value.to_string()
+    }
+
+    fn clone(&self) -> Box<dyn Node> {
+        Box::new(NumNode { value: self.value })
+    }
+}
+
+/*------------------------------------------------------*
+| OpNode
+*-------------------------------------------------------*/
+
+trait OpNode: Node {
+    fn vars(&self) -> Vec<&dyn Node> {
+        let mut vars = self.a().vars();
+        vars.extend(self.b().vars());
+        vars
+    }
+}
+
+/*------------------------------------------------------*
+| LtNode
+*-------------------------------------------------------*/
+
+pub struct LtNode {
+    a: Box<dyn Node>,
+    b: Box<dyn Node>,
+    min: isize,
+    max: isize,
+}
+
+impl LtNode {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(a: &dyn Node, b: &dyn Node) -> Box<dyn Node> {
+        let mut node = LtNode {
+            a: a.clone(),
+            b: b.clone(),
+            min: 0,
+            max: 0,
         };
-        self.add(neg_value)
+
+        let (min, max) = node.get_bounds();
+        node.min = min;
+        node.max = max;
+
+        Box::new(node)
+    }
+}
+
+impl Node for LtNode {
+    fn a(&self) -> &dyn Node {
+        self.a.as_ref()
+    }
+
+    fn b(&self) -> &dyn Node {
+        self.b.as_ref()
+    }
+
+    fn min(&self) -> isize {
+        self.min
+    }
+
+    fn max(&self) -> isize {
+        self.max
+    }
+
+    fn render(&self, _debug: bool, _strip_parens: bool) -> String {
+        todo!()
+    }
+
+    fn clone(&self) -> Box<dyn Node> {
+        Box::new(LtNode {
+            a: self.a.clone(),
+            b: self.b.clone(),
+            min: self.min,
+            max: self.max,
+        })
+    }
+
+    fn get_bounds(&self) -> (isize, isize) {
+        if self.a.max() < self.b.min() {
+            (1, 1)
+        } else if self.a.min() > self.b.max() {
+            (0, 0)
+        } else {
+            (0, 1)
+        }
+    }
+
+    fn floordiv(&self, b: &dyn Node, _: Option<bool>) -> Box<dyn Node> {
+        let x = self.a.floordiv(self.b.as_ref(), None);
+        let y = self.b.floordiv(b, None);
+        x.lt(y.as_ref())
+    }
+}
+
+impl OpNode for LtNode {}
+
+/*------------------------------------------------------*
+| MulNode
+*-------------------------------------------------------*/
+
+struct MulNode {
+    a: Box<dyn Node>,
+    b: Box<dyn Node>,
+    min: isize,
+    max: isize,
+}
+
+impl MulNode {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(a: &dyn Node, b: &dyn Node) -> Box<dyn Node> {
+        let mut node = MulNode {
+            a: a.clone(),
+            b: b.clone(),
+            min: 0,
+            max: 0,
+        };
+
+        let (min, max) = node.get_bounds();
+        node.min = min;
+        node.max = max;
+
+        Box::new(node)
+    }
+}
+
+impl Node for MulNode {
+    fn min(&self) -> isize {
+        self.min
+    }
+
+    fn max(&self) -> isize {
+        self.max
+    }
+
+    fn render(&self, debug: bool, strip_parens: bool) -> String {
+        todo!()
+    }
+
+    fn clone(&self) -> Box<dyn Node> {
+        Box::new(MulNode {
+            a: self.a.clone(),
+            b: self.b.clone(),
+            min: self.min,
+            max: self.max,
+        })
+    }
+
+    fn mul(&self, b: &dyn Node) -> Box<dyn Node> {
+        self.a.mul(b).lt(self.b.mul(b).as_ref())
+    }
+
+    fn floordiv(&self, _other: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
+        todo!()
+    }
+
+    fn modulus(&self, _other: &dyn Node) -> Box<dyn Node> {
+        todo!()
+    }
+
+    fn get_bounds(&self) -> (isize, isize) {
+        let b = self.b.intval();
+
+        if b >= 0 {
+            (self.a.min() * b, self.a.max() * b)
+        } else {
+            (self.a.max() * b, self.a.min() * b)
+        }
+    }
+}
+
+impl OpNode for MulNode {}
+
+/*------------------------------------------------------*
+| DivNode
+*-------------------------------------------------------*/
+
+pub struct DivNode {
+    a: Box<dyn Node>,
+    b: Box<dyn Node>,
+    min: isize,
+    max: isize,
+}
+
+impl DivNode {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(a: &dyn Node, b: &dyn Node) -> Box<dyn Node> {
+        let mut node = DivNode {
+            a: a.clone(),
+            b: b.clone(),
+            min: 0,
+            max: 0,
+        };
+
+        let (min, max) = node.get_bounds();
+        node.min = min;
+        node.max = max;
+
+        Box::new(node)
+    }
+}
+
+impl Node for DivNode {
+    fn min(&self) -> isize {
+        self.min
+    }
+
+    fn max(&self) -> isize {
+        self.max
+    }
+
+    fn render(&self, _debug: bool, _strip_parens: bool) -> String {
+        todo!()
+    }
+
+    fn clone(&self) -> Box<dyn Node> {
+        Box::new(DivNode {
+            a: self.a.clone(),
+            b: self.b.clone(),
+            min: self.min,
+            max: self.max,
+        })
+    }
+
+    fn get_bounds(&self) -> (isize, isize) {
+        debug_assert!(self.a.min() >= 0);
+
+        let b = self.b.intval();
+        (self.a.min() / b, self.a.max() / b)
+    }
+
+    fn floordiv(&self, b: &dyn Node, _: Option<bool>) -> Box<dyn Node> {
+        self.a.floordiv(self.b.mul(b).as_ref(), None)
+    }
+}
+
+impl OpNode for DivNode {}
+
+/*------------------------------------------------------*
+| RedNode
+*-------------------------------------------------------*/
+
+pub trait RedNode: Node {
+    fn init(&mut self, nodes: &[&dyn Node]);
+
+    fn vars(&self) -> Vec<&dyn Node> {
+        let mut vars = vec![];
+        for node in self.nodes() {
+            vars.extend(node.vars());
+        }
+        vars
     }
 }
