@@ -161,6 +161,17 @@ pub struct Var {
     max: isize,
 }
 
+impl Var {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(expr: &str, min: isize, max: isize) -> Box<dyn Node> {
+        Box::new(Var {
+            expr: expr.to_string(),
+            min,
+            max,
+        })
+    }
+}
+
 impl Node for Var {
     fn expr(&self) -> &str {
         &self.expr

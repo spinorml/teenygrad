@@ -20,46 +20,53 @@
  * SOFTWARE.
  */
 
-use teenygrad::shape::symbolic::Node;
+use teenygrad::shape::symbolic1::{num, Node, Var};
 
-fn test_variable(v: Node, min: isize, max: isize, s: &str) {
-    let (vmin, vmax) = v.min_max();
+fn test_variable(v: &Box<dyn Node>, min: isize, max: isize, s: &str) {
+    let (vmin, vmax) = (v.min(), v.max());
 
-    assert_eq!(format!("{v}"), s);
+    assert_eq!(format!("{}", v.render(false, false)), s);
     assert_eq!(vmin, min);
     assert_eq!(vmax, max);
 }
 
 #[test]
 fn test_ge() {
-    let node = Node::new_var("a", 3, 8);
+    let node = Var::new("a", 3, 8);
 
-    test_variable(node.clone().ge(77), 0, 0, "0");
-    test_variable(node.clone().ge(9), 0, 0, "0");
-    test_variable(node.clone().ge(8), 0, 1, "((a*-1)<-7)");
-    test_variable(node.clone().ge(4), 0, 1, "((a*-1)<-3)");
-    test_variable(node.clone().ge(3), 1, 1, "1");
-    test_variable(node.clone().ge(2), 1, 1, "1");
+    test_variable(&node.ge(num(77).as_ref()), 0, 0, "0");
+    test_variable(&node.ge(num(9).as_ref()), 0, 0, "0");
+    test_variable(&node.ge(num(8).as_ref()), 0, 1, "((a*-1)<-7)");
+    test_variable(&node.ge(num(4).as_ref()), 0, 1, "((a*-1)<-3)");
+    test_variable(&node.ge(num(3).as_ref()), 1, 1, "1");
+    test_variable(&node.ge(num(2).as_ref()), 1, 1, "1");
 }
 
 #[test]
 fn test_lt() {
-    let node = Node::new_var("a", 3, 8);
+    let node = Var::new("a", 3, 8);
 
-    test_variable(node.clone().lt(77), 1, 1, "1");
-    test_variable(node.clone().lt(9), 1, 1, "1");
-    test_variable(node.clone().lt(8), 0, 1, "(a<8)");
-    test_variable(node.clone().lt(4), 0, 1, "(a<4)");
-    test_variable(node.clone().lt(3), 0, 0, "0");
-    test_variable(node.clone().lt(2), 0, 0, "0");
+    test_variable(&node.lt(num(77).as_ref()), 1, 1, "1");
+    test_variable(&node.lt(num(9).as_ref()), 1, 1, "1");
+    test_variable(&node.lt(num(8).as_ref()), 0, 1, "(a<8)");
+    test_variable(&node.lt(num(4).as_ref()), 0, 1, "(a<4)");
+    test_variable(&node.lt(num(3).as_ref()), 0, 0, "0");
+    test_variable(&node.lt(num(2).as_ref()), 0, 0, "0");
 }
 
 #[test]
 fn test_ge_divides() {
-    let expr = (Node::new_var("idx", 0, 511) * 4 + Node::new_var("FLOAT4_INDEX", 0, 3)).lt(512);
+    let expr = (Var::new("idx", 0, 511).mul(num(4).as_ref()))
+        .add(Var::new("FLOAT4_INDEX", 0, 3).as_ref())
+        .lt(num(512).as_ref());
 
-    test_variable(expr.clone(), 0, 1, "((idx*4)<512)");
-    test_variable(expr.floordiv(4, Some(false)), 0, 1, "(idx<128)");
+    test_variable(&expr, 0, 1, "((idx*4)<512)");
+    test_variable(
+        &expr.floordiv(num(4).as_ref(), Some(false)),
+        0,
+        1,
+        "(idx<128)",
+    );
 }
 
 #[test]
@@ -518,9 +525,9 @@ fn test_div_into_mod() {
     );
 }
 
-fn test_numeric(fx: fn(node: Node) -> Node, fi: fn(val: isize) -> isize) {
+fn test_numeric(fx: fn(node: &dyn Node) -> &dyn Node, fi: fn(val: isize) -> isize) {
     for i in 0..10 {
-        let x = fx(Node::new_num(i));
+        let x = fx(num(i));
         let (min, max) = x.min_max();
         assert_eq!(min, max);
         assert_eq!(min, fi(i));
