@@ -20,7 +20,7 @@
  * SOFTWARE.
  */
 
-use teenygrad::shape::symbolic1::{num, Node, Var};
+use teenygrad::shape::symbolic1::{ands, num, Node, Var};
 
 fn test_variable(v: &Box<dyn Node>, min: isize, max: isize, s: &str) {
     let (vmin, vmax) = (v.min(), v.max());
@@ -71,20 +71,30 @@ fn test_ge_divides() {
 
 #[test]
 fn test_ge_divides_and() {
-    let expr = Node::new_ands(&[
-        (Node::new_var("idx1", 0, 511) * 4 + Node::new_var("FLOAT4_INDEX", 0, 3)).lt(512),
-        (Node::new_var("idx2", 0, 511) * 4 + Node::new_var("FLOAT4_INDEX", 0, 3)).lt(512),
-    ]);
-    let x = expr.floordiv(4, None);
+    let a = Var::new("idx1", 0, 511)
+        .mul(num(4).as_ref())
+        .add(Var::new("FLOAT4_INDEX", 0, 3).as_ref());
+    let b = Var::new("idx2", 0, 511)
+        .mul(num(4).as_ref())
+        .add(Var::new("FLOAT4_INDEX", 0, 3).as_ref())
+        .lt(num(512).as_ref());
+    let expr = ands(&[a.as_ref(), b.as_ref()]);
+    let x = expr.floordiv(num(4).as_ref(), None);
 
-    test_variable(x, 0, 1, "((idx1<128) and (idx2<128))");
+    test_variable(&x, 0, 1, "((idx1<128) and (idx2<128))");
 
-    let expr = Node::new_ands(&[
-        (Node::new_var("idx1", 0, 511) * 4 + Node::new_var("FLOAT4_INDEX", 0, 3)).lt(512),
-        (Node::new_var("idx2", 0, 511) * 4 + Node::new_var("FLOAT8_INDEX", 0, 7)).lt(512),
-    ]);
+    let a = Var::new("idx1", 0, 511)
+        .mul(num(4).as_ref())
+        .add(Var::new("FLOAT4_INDEX", 0, 3).as_ref())
+        .lt(num(512).as_ref());
+    let b = Var::new("idx2", 0, 511)
+        .mul(num(4).as_ref())
+        .add(Var::new("FLOAT8_INDEX", 0, 7).as_ref())
+        .lt(num(512).as_ref());
+    let expr = ands(&[a.as_ref(), b.as_ref()]);
+
     test_variable(
-        expr.floordiv(4, None),
+        &expr.floordiv(num(4).as_ref(), None),
         0,
         1,
         "((idx1<128) and ((idx2+(FLOAT8_INDEX//4))<128))",
