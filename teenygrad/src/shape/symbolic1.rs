@@ -39,6 +39,14 @@ pub trait Node {
 
     fn max(&self) -> isize;
 
+    fn is_num(&self) -> bool {
+        false
+    }
+
+    fn is_var(&self) -> bool {
+        false
+    }
+
     fn intval(&self) -> isize {
         panic!("Invalid node")
     }
@@ -132,6 +140,10 @@ pub fn num(value: isize) -> Box<dyn Node> {
     NumNode::new(value)
 }
 
+pub fn var(expr: &str, min: isize, max: isize) -> Box<dyn Node> {
+    create_node(Var::new(expr, min, max).as_ref())
+}
+
 pub fn factorize(_nodes: &[&dyn Node]) -> Box<dyn Node> {
     todo!()
 }
@@ -185,6 +197,10 @@ impl Node for Var {
         self.max
     }
 
+    fn is_var(&self) -> bool {
+        true
+    }
+
     fn render(&self, debug: bool, strip_parens: bool) -> String {
         todo!()
     }
@@ -227,6 +243,10 @@ impl Node for NumNode {
 
     fn intval(&self) -> isize {
         self.value
+    }
+
+    fn is_num(&self) -> bool {
+        true
     }
 
     fn render(&self, _debug: bool, _strip_parens: bool) -> String {
