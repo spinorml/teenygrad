@@ -20,9 +20,9 @@
  * SOFTWARE.
  */
 
-use teenygrad::shape::symbolic1::{ands, num, sum, var, Node};
+use teenygrad::shape::symbolic::{ands, num, sum, var, Node};
 
-fn test_variable(v: &Box<dyn Node>, min: isize, max: isize, s: &str) {
+fn test_variable(v: Box<dyn Node>, min: isize, max: isize, s: &str) {
     let (vmin, vmax) = (v.min(), v.max());
 
     assert_eq!(format!("{}", v.render(false, false)), s);
@@ -34,24 +34,24 @@ fn test_variable(v: &Box<dyn Node>, min: isize, max: isize, s: &str) {
 fn test_ge() {
     let node = var("a", 3, 8);
 
-    test_variable(&node.ge(num(77).as_ref()), 0, 0, "0");
-    test_variable(&node.ge(num(9).as_ref()), 0, 0, "0");
-    test_variable(&node.ge(num(8).as_ref()), 0, 1, "((a*-1)<-7)");
-    test_variable(&node.ge(num(4).as_ref()), 0, 1, "((a*-1)<-3)");
-    test_variable(&node.ge(num(3).as_ref()), 1, 1, "1");
-    test_variable(&node.ge(num(2).as_ref()), 1, 1, "1");
+    test_variable(node.ge(num(77).as_ref()), 0, 0, "0");
+    test_variable(node.ge(num(9).as_ref()), 0, 0, "0");
+    test_variable(node.ge(num(8).as_ref()), 0, 1, "((a*-1)<-7)");
+    test_variable(node.ge(num(4).as_ref()), 0, 1, "((a*-1)<-3)");
+    test_variable(node.ge(num(3).as_ref()), 1, 1, "1");
+    test_variable(node.ge(num(2).as_ref()), 1, 1, "1");
 }
 
 #[test]
 fn test_lt() {
     let node = var("a", 3, 8);
 
-    test_variable(&node.lt(num(77).as_ref()), 1, 1, "1");
-    test_variable(&node.lt(num(9).as_ref()), 1, 1, "1");
-    test_variable(&node.lt(num(8).as_ref()), 0, 1, "(a<8)");
-    test_variable(&node.lt(num(4).as_ref()), 0, 1, "(a<4)");
-    test_variable(&node.lt(num(3).as_ref()), 0, 0, "0");
-    test_variable(&node.lt(num(2).as_ref()), 0, 0, "0");
+    test_variable(node.lt(num(77).as_ref()), 1, 1, "1");
+    test_variable(node.lt(num(9).as_ref()), 1, 1, "1");
+    test_variable(node.lt(num(8).as_ref()), 0, 1, "(a<8)");
+    test_variable(node.lt(num(4).as_ref()), 0, 1, "(a<4)");
+    test_variable(node.lt(num(3).as_ref()), 0, 0, "0");
+    test_variable(node.lt(num(2).as_ref()), 0, 0, "0");
 }
 
 #[test]
@@ -60,9 +60,9 @@ fn test_ge_divides() {
         .add(var("FLOAT4_INDEX", 0, 3).as_ref())
         .lt(num(512).as_ref());
 
-    test_variable(&expr, 0, 1, "((idx*4)<512)");
+    test_variable(expr.clone(), 0, 1, "((idx*4)<512)");
     test_variable(
-        &expr.floordiv(num(4).as_ref(), Some(false)),
+        expr.floordiv(num(4).as_ref(), Some(false)),
         0,
         1,
         "(idx<128)",
@@ -81,7 +81,7 @@ fn test_ge_divides_and() {
     let expr = ands(&[a.as_ref(), b.as_ref()]);
     let x = expr.floordiv(num(4).as_ref(), None);
 
-    test_variable(&x, 0, 1, "((idx1<128) and (idx2<128))");
+    test_variable(x, 0, 1, "((idx1<128) and (idx2<128))");
 
     let a = var("idx1", 0, 511)
         .mul(num(4).as_ref())
@@ -94,7 +94,7 @@ fn test_ge_divides_and() {
     let expr = ands(&[a.as_ref(), b.as_ref()]);
 
     test_variable(
-        &expr.floordiv(num(4).as_ref(), None),
+        expr.floordiv(num(4).as_ref(), None),
         0,
         1,
         "((idx1<128) and ((idx2+(FLOAT8_INDEX//4))<128))",
@@ -103,8 +103,12 @@ fn test_ge_divides_and() {
 
 #[test]
 fn test_lt_factors() {
-    let expr = ands(&[(var("idx1", 0, 511) * 4 + var("FLOAT4_INDEX", 0, 256)).lt(512)]);
-    test_variable(&expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)");
+    let expr = ands(&[var("idx1", 0, 511)
+        .mul(num(4).as_ref())
+        .add(var("FLOAT4_INDEX", 0, 256).as_ref())
+        .lt(num(512).as_ref())
+        .as_ref()]);
+    test_variable(expr, 0, 1, "(((idx1*4)+FLOAT4_INDEX)<512)");
 }
 
 #[test]
@@ -119,8 +123,8 @@ fn test_var_becomes_num() {
 
 #[test]
 fn test_equality() {
-    let idx1 = var("idx1", 0, 3);
-    let idx2 = var("idx2", 0, 3);
+    // let idx1 = var("idx1", 0, 3);
+    // let idx2 = var("idx2", 0, 3);
 
     // TODO - fix test cases
     // assert_eq!(idx1, idx1);
@@ -137,7 +141,7 @@ fn test_equality() {
 fn test_factorize() {
     let a = var("a", 0, 8);
     test_variable(
-        &a.mul(num(2).as_ref()).add(a.mul(num(3).as_ref()).as_ref()),
+        a.mul(num(2).as_ref()).add(a.mul(num(3).as_ref()).as_ref()),
         0,
         8 * 5,
         "(a*5)",
@@ -147,49 +151,51 @@ fn test_factorize() {
 #[test]
 fn test_factorize_no_mul() {
     let a = var("a", 0, 8);
-    test_variable(&a.add(a.mul(num(3).as_ref()).as_ref()), 0, 8 * 4, "(a*4)");
+    test_variable(a.add(a.mul(num(3).as_ref()).as_ref()), 0, 8 * 4, "(a*4)");
 }
 
 #[test]
 fn test_neg() {
-    test_variable(&var("a", 0, 8).neg(), -8, 0, "(a*-1)");
+    test_variable(var("a", 0, 8).neg(), -8, 0, "(a*-1)");
 }
 
 #[test]
 fn test_add_1() {
-    test_variable(&var("a", 0, 8).add(num(1).as_ref()), 1, 9, "(a+1)");
+    test_variable(var("a", 0, 8).add(num(1).as_ref()), 1, 9, "(a+1)");
 }
 
 #[test]
 fn test_add_num_1() {
-    test_variable(var("a", 0, 8) + num(1), 1, 9, "(a+1)");
+    test_variable(var("a", 0, 8).add(num(1).as_ref()), 1, 9, "(a+1)");
 }
 
 #[test]
 fn test_sub_1() {
-    test_variable(&var("a", 0, 8).sub(num(1).as_ref()), -1, 7, "(a+-1)");
+    test_variable(var("a", 0, 8).sub(num(1).as_ref()), -1, 7, "(a+-1)");
 }
 
 #[test]
 fn test_sub_num_1() {
-    test_variable(&var("a", 0, 8).sub(num(1).as_ref()), -1, 7, "(a+(1*-1))");
+    test_variable(var("a", 0, 8).sub(num(1).as_ref()), -1, 7, "(a+(1*-1))");
 }
 
 #[test]
 #[allow(clippy::erasing_op)]
 fn test_mul_0() {
-    test_variable(&var("a", 0, 8).mul(num(0).as_ref()), 0, 0, "0");
+    test_variable(var("a", 0, 8).mul(num(0).as_ref()), 0, 0, "0");
 }
 
 #[test]
 fn test_mul_1() {
-    test_variable(&var("a", 0, 8).mul(num(1).as_ref()), 0, 8, "a");
+    test_variable(var("a", 0, 8).mul(num(1).as_ref()), 0, 8, "a");
 }
 
 #[test]
 fn test_mul_neg_1() {
     test_variable(
-        &(var("a", 0, 2).mul(num(-1).as_ref())).floordiv(num(3).as_ref(), None),
+        var("a", 0, 2)
+            .mul(num(-1).as_ref())
+            .floordiv(num(3).as_ref(), None),
         -1,
         0,
         "((((a*-1)+3)//3)+-1)",
@@ -198,23 +204,23 @@ fn test_mul_neg_1() {
 
 #[test]
 fn test_mul_2() {
-    test_variable(&var("a", 0, 8).mul(num(2).as_ref()), 0, 16, "(a*2)");
+    test_variable(var("a", 0, 8).mul(num(2).as_ref()), 0, 16, "(a*2)");
 }
 
 #[test]
 fn test_div_1() {
-    test_variable(&var("a", 0, 8).floordiv(num(1).as_ref(), None), 0, 8, "a");
+    test_variable(var("a", 0, 8).floordiv(num(1).as_ref(), None), 0, 8, "a");
 }
 
 #[test]
 fn test_mod_1() {
-    test_variable(&var("a", 0, 8).modulus(num(1).as_ref()), 0, 0, "0");
+    test_variable(var("a", 0, 8).modulus(num(1).as_ref()), 0, 0, "0");
 }
 
 #[test]
 fn test_add_min_max() {
     test_variable(
-        &var("a", 0, 8).mul(num(2).as_ref()).add(num(12).as_ref()),
+        var("a", 0, 8).mul(num(2).as_ref()).add(num(12).as_ref()),
         12,
         16 + 12,
         "((a*2)+12)",
@@ -224,7 +230,7 @@ fn test_add_min_max() {
 #[test]
 fn test_div_min_max() {
     test_variable(
-        &var("a", 0, 7).floordiv(num(2).as_ref(), None),
+        var("a", 0, 7).floordiv(num(2).as_ref(), None),
         0,
         3,
         "(a//2)",
@@ -234,7 +240,7 @@ fn test_div_min_max() {
 #[test]
 fn test_div_neg_min_max() {
     test_variable(
-        &var("a", 0, 7).floordiv(num(-2).as_ref(), None),
+        var("a", 0, 7).floordiv(num(-2).as_ref(), None),
         -3,
         0,
         "((a//2)*-1)",
@@ -244,7 +250,7 @@ fn test_div_neg_min_max() {
 #[test]
 fn test_sum_div_min_max() {
     test_variable(
-        &sum(&[var("a", 0, 7).as_ref(), var("b", 0, 3).as_ref()]).floordiv(num(2).as_ref(), None),
+        sum(&[var("a", 0, 7).as_ref(), var("b", 0, 3).as_ref()]).floordiv(num(2).as_ref(), None),
         0,
         5,
         "((a+b)//2)",
@@ -254,7 +260,7 @@ fn test_sum_div_min_max() {
 #[test]
 fn test_sum_div_factor() {
     test_variable(
-        &sum(&[
+        sum(&[
             var("a", 0, 7).mul(num(4).as_ref()).as_ref(),
             var("b", 0, 3).mul(num(4).as_ref()).as_ref(),
         ])
@@ -268,7 +274,7 @@ fn test_sum_div_factor() {
 #[test]
 fn test_sum_div_some_factor() {
     test_variable(
-        &sum(&[
+        sum(&[
             var("a", 0, 7).mul(num(5).as_ref()).as_ref(),
             var("b", 0, 3).mul(num(4).as_ref()).as_ref(),
         ])
@@ -282,7 +288,7 @@ fn test_sum_div_some_factor() {
 #[test]
 fn test_sum_div_some_partial_factor() {
     test_variable(
-        &sum(&[
+        sum(&[
             num(16).as_ref(),
             var("a", 0, 7).mul(num(6).as_ref()).as_ref(),
             var("b", 0, 7).mul(num(6).as_ref()).as_ref(),
@@ -297,7 +303,7 @@ fn test_sum_div_some_partial_factor() {
 #[test]
 fn test_sum_div_no_factor() {
     test_variable(
-        &sum(&[
+        sum(&[
             var("a", 0, 7).mul(num(5).as_ref()).as_ref(),
             var("b", 0, 3).mul(num(5).as_ref()).as_ref(),
         ])
@@ -311,7 +317,7 @@ fn test_sum_div_no_factor() {
 #[test]
 fn test_mod_factor() {
     test_variable(
-        &sum(&[
+        sum(&[
             var("a", 0, 7).mul(num(100).as_ref()).as_ref(),
             var("b", 0, 3).mul(num(50).as_ref()).as_ref(),
         ])
@@ -325,7 +331,7 @@ fn test_mod_factor() {
 #[test]
 fn test_sum_div_const() {
     test_variable(
-        &sum(&[
+        sum(&[
             var("a", 0, 7).mul(num(4).as_ref()).as_ref(),
             num(3).as_ref(),
         ])
@@ -339,7 +345,7 @@ fn test_sum_div_const() {
 #[test]
 fn test_sum_div_const_big() {
     test_variable(
-        &sum(&[
+        sum(&[
             var("a", 0, 7).mul(num(4).as_ref()).as_ref(),
             num(3).as_ref(),
         ])
@@ -353,7 +359,7 @@ fn test_sum_div_const_big() {
 #[test]
 fn test_mod_mul() {
     test_variable(
-        &var("a", 0, 5)
+        var("a", 0, 5)
             .mul(num(10).as_ref())
             .modulus(num(9).as_ref()),
         0,
@@ -365,7 +371,7 @@ fn test_mod_mul() {
 #[test]
 fn test_mul_mul() {
     test_variable(
-        &var("a", 0, 5).mul(num(10).as_ref()).mul(num(9).as_ref()),
+        var("a", 0, 5).mul(num(10).as_ref()).mul(num(9).as_ref()),
         0,
         5 * 10 * 9,
         "(a*90)",
@@ -375,7 +381,7 @@ fn test_mul_mul() {
 #[test]
 fn test_div_div() {
     test_variable(
-        &var("a", 0, 1800)
+        var("a", 0, 1800)
             .floordiv(num(10).as_ref(), None)
             .floordiv(num(9).as_ref(), None),
         0,
@@ -387,7 +393,7 @@ fn test_div_div() {
 #[test]
 fn test_distribute_mul() {
     test_variable(
-        &sum(&[var("a", 0, 3).as_ref(), var("b", 0, 5).as_ref()]).mul(num(3).as_ref()),
+        sum(&[var("a", 0, 3).as_ref(), var("b", 0, 5).as_ref()]).mul(num(3).as_ref()),
         0,
         24,
         "((a*3)+(b*3))",
@@ -397,7 +403,7 @@ fn test_distribute_mul() {
 #[test]
 fn test_mod_mul_sum() {
     test_variable(
-        &sum(&[
+        sum(&[
             var("b", 0, 2).as_ref(),
             var("a", 0, 5).mul(num(10).as_ref()).as_ref(),
         ])
@@ -410,53 +416,43 @@ fn test_mod_mul_sum() {
 
 #[test]
 fn test_sum_0() {
-    test_variable(&sum(&[var("a", 0, 7).as_ref()]), 0, 7, "a");
+    test_variable(sum(&[var("a", 0, 7).as_ref()]), 0, 7, "a");
 }
 
 #[test]
 fn test_mod_remove() {
-    test_variable(&var("a", 0, 6).modulus(num(100).as_ref()), 0, 6, "a");
+    test_variable(var("a", 0, 6).modulus(num(100).as_ref()), 0, 6, "a");
 }
 
 #[test]
 fn test_big_mod() {
-    test_variable(&var("a", 0, 20).modulus(num(10).as_ref()), 0, 9, "(a%10)");
+    test_variable(var("a", 0, 20).modulus(num(10).as_ref()), 0, 9, "(a%10)");
 }
 
 #[test]
 fn test_gt_remove() {
-    test_variable(&var("a", 0, 6).ge(num(25).as_ref()), 0, 0, "0");
+    test_variable(var("a", 0, 6).ge(num(25).as_ref()), 0, 0, "0");
 }
 
 #[test]
 fn test_lt_remove() {
-    test_variable(&var("a", 0, 6).lt(num(8).as_ref()), 1, 1, "1");
+    test_variable(var("a", 0, 6).lt(num(8).as_ref()), 1, 1, "1");
 }
 
 #[test]
 fn test_and_fold() {
-    test_variable(
-        &ands(&[num(0).as_ref(), var("a", 0, 1).as_ref()]),
-        0,
-        0,
-        "0",
-    );
+    test_variable(ands(&[num(0).as_ref(), var("a", 0, 1).as_ref()]), 0, 0, "0");
 }
 
 #[test]
 fn test_and_remove() {
-    test_variable(
-        &ands(&[num(1).as_ref(), var("a", 0, 1).as_ref()]),
-        0,
-        1,
-        "a",
-    );
+    test_variable(ands(&[num(1).as_ref(), var("a", 0, 1).as_ref()]), 0, 1, "a");
 }
 
 #[test]
 fn test_mod_factor_negative() {
     test_variable(
-        &sum(&[
+        sum(&[
             num(-29).as_ref(),
             var("a", 0, 100).as_ref(),
             var("b", 0, 10).mul(num(28).as_ref()).as_ref(),
@@ -471,7 +467,7 @@ fn test_mod_factor_negative() {
 #[test]
 fn test_sum_combine_num() {
     test_variable(
-        &sum(&[
+        sum(&[
             num(29).as_ref(),
             var("a", 0, 10).as_ref(),
             num(-23).as_ref(),
@@ -485,7 +481,7 @@ fn test_sum_combine_num() {
 #[test]
 fn test_sum_num_hoisted_and_factors_cancel_out() {
     test_variable(
-        &sum(&[
+        sum(&[
             var("a", 0, 1)
                 .mul(num(-4).as_ref())
                 .add(num(1).as_ref())
@@ -501,7 +497,7 @@ fn test_sum_num_hoisted_and_factors_cancel_out() {
 #[test]
 fn test_div_factor() {
     test_variable(
-        &sum(&[
+        sum(&[
             num(-40).as_ref(),
             var("a", 0, 10).mul(num(2).as_ref()).as_ref(),
             var("b", 0, 10).mul(num(40).as_ref()).as_ref(),
@@ -516,7 +512,7 @@ fn test_div_factor() {
 #[test]
 fn test_mul_div() {
     test_variable(
-        &var("a", 0, 10)
+        var("a", 0, 10)
             .mul(num(4).as_ref())
             .floordiv(num(4).as_ref(), None),
         0,
@@ -527,18 +523,36 @@ fn test_mul_div() {
 
 #[test]
 fn test_mul_div_factor_mul() {
-    test_variable((var("a", 0, 10) * 8).floordiv(4, None), 0, 20, "(a*2)");
+    test_variable(
+        var("a", 0, 10)
+            .mul(num(8).as_ref())
+            .floordiv(num(4).as_ref(), None),
+        0,
+        20,
+        "(a*2)",
+    );
 }
 
 #[test]
 fn test_mul_div_factor_div() {
-    test_variable((var("a", 0, 10) * 4).floordiv(8, None), 0, 5, "(a//2)");
+    test_variable(
+        var("a", 0, 10)
+            .mul(num(4).as_ref())
+            .floordiv(num(8).as_ref(), None),
+        0,
+        5,
+        "(a//2)",
+    );
 }
 
 #[test]
 fn test_div_remove() {
     test_variable(
-        sum(&[var("idx0", 0, 127) * 4, var("idx2", 0, 3)]).floordiv(4, None),
+        sum(&[
+            var("idx0", 0, 127).mul(num(4).as_ref()).as_ref(),
+            var("idx2", 0, 3).as_ref(),
+        ])
+        .floordiv(num(4).as_ref(), None),
         0,
         127,
         "idx0",
@@ -548,7 +562,9 @@ fn test_div_remove() {
 #[test]
 fn test_div_numerator_negative() {
     test_variable(
-        (var("idx", 0, 9) * -10).floordiv(11, None),
+        var("idx", 0, 9)
+            .mul(num(-10).as_ref())
+            .floordiv(num(11).as_ref(), None),
         -9,
         0,
         "((((idx*-10)+99)//11)+-9)",
@@ -558,17 +574,20 @@ fn test_div_numerator_negative() {
 #[test]
 fn test_div_into_mod() {
     test_variable(
-        (var("idx", 0, 16) * 4).modulus(8).floordiv(4, None),
+        var("idx", 0, 16)
+            .mul(num(4).as_ref())
+            .modulus(num(8).as_ref())
+            .floordiv(num(4).as_ref(), None),
         0,
         1,
         "(idx%2)",
     );
 }
 
-fn test_numeric(fx: fn(node: &dyn Node) -> &dyn Node, fi: fn(val: isize) -> isize) {
+fn test_numeric(fx: fn(node: Box<dyn Node>) -> Box<dyn Node>, fi: fn(val: isize) -> isize) {
     for i in 0..10 {
         let x = fx(num(i));
-        let (min, max) = x.min_max();
+        let (min, max) = (x.min(), x.max());
         assert_eq!(min, max);
         assert_eq!(min, fi(i));
     }
@@ -580,7 +599,7 @@ fn test_numeric(fx: fn(node: &dyn Node) -> &dyn Node, fi: fn(val: isize) -> isiz
             }
 
             let v = fx(var("tmp", kmin, kmax));
-            let (min, max) = v.min_max();
+            let (min, max) = (v.min(), v.max());
 
             let values: Vec<isize> = (kmin..kmax + 1).map(&fi).collect();
             let min_value = values.iter().min().unwrap();
@@ -594,55 +613,68 @@ fn test_numeric(fx: fn(node: &dyn Node) -> &dyn Node, fi: fn(val: isize) -> isiz
 
 #[test]
 fn test_mod_4() {
-    test_numeric(|x| x.modulus(4), |x| x % 4);
+    test_numeric(|x| x.modulus(num(4).as_ref()), |x| x % 4);
 }
 
 #[test]
 fn test_div_4() {
-    test_numeric(|x| x.floordiv(num(4).as_ref(), None).as_ref(), |x| x / 4);
+    test_numeric(|x| x.floordiv(num(4).as_ref(), None), |x| x / 4);
 }
 
 #[test]
 fn test_plus_1_div_2() {
     test_numeric(
-        |x| {
-            (x.add(num(1).as_ref()))
-                .floordiv(num(2).as_ref(), None)
-                .as_ref()
-        },
+        |x| (x.add(num(1).as_ref())).floordiv(num(2).as_ref(), None),
         |x| (x + 1) / 2,
     );
 }
 
 #[test]
 fn test_plus_1_mod_2() {
-    test_numeric(|x| (x + 1).modulus(2), |x| (x + 1) % 2);
+    test_numeric(
+        |x| (x.add(num(1).as_ref())).modulus(num(2).as_ref()),
+        |x| (x + 1) % 2,
+    );
 }
 
 #[test]
 fn test_times_2() {
-    test_numeric(|x| x * 2, |x| x * 2);
+    test_numeric(|x| x.mul(num(2).as_ref()), |x| x * 2);
 }
 
 #[test]
 fn test_times_2_plus_3() {
-    test_numeric(|x| x * 2 + 3, |x| x * 2 + 3);
+    test_numeric(
+        |x| x.mul(num(2).as_ref()).add(num(3).as_ref()),
+        |x| x * 2 + 3,
+    );
 }
 
 #[test]
 fn test_times_2_plus_3_mod_4() {
-    test_numeric(|x| (x * 2 + 3).modulus(4), |x| (x * 2 + 3) % 4);
+    test_numeric(
+        |x| (x.mul(num(2).as_ref()).add(num(3).as_ref())).modulus(num(4).as_ref()),
+        |x| (x * 2 + 3) % 4,
+    );
 }
 
 #[test]
 fn test_times_2_plus_3_div_4() {
-    test_numeric(|x| (x * 2 + 3).modulus(4), |x| (x * 2 + 3) % 4);
+    test_numeric(
+        |x| (x.mul(num(2).as_ref()).add(num(3).as_ref())).modulus(num(4).as_ref()),
+        |x| (x * 2 + 3) % 4,
+    );
 }
 
 #[test]
 fn test_times_2_plus_3_div_4_mod_4() {
     test_numeric(
-        |x| ((x * 2 + 3).floordiv(4, None)).modulus(4),
+        |x| {
+            (x.mul(num(2).as_ref())
+                .add(num(3).as_ref())
+                .floordiv(num(4).as_ref(), None))
+            .modulus(num(4).as_ref())
+        },
         |x| ((x * 2 + 3) / 4) % 4,
     );
 }
