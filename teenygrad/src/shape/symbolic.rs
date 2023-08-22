@@ -20,19 +20,22 @@
  * SOFTWARE.
  */
 
-use std::{collections::hash_map::DefaultHasher, hash::Hasher};
+use std::{
+    collections::{hash_map::DefaultHasher, HashSet},
+    hash::Hasher,
+};
 
 pub trait Node {
-    fn expr(&self) -> &str {
-        panic!("Invalid node")
+    fn expr(&self) -> Option<&str> {
+        None
     }
 
-    fn a(&self) -> &dyn Node {
-        panic!("Invalid node")
+    fn a(&self) -> Option<&dyn Node> {
+        None
     }
 
-    fn b(&self) -> &dyn Node {
-        panic!("Invalid node")
+    fn b(&self) -> Option<&dyn Node> {
+        None
     }
 
     fn min(&self) -> isize;
@@ -47,8 +50,27 @@ pub trait Node {
         false
     }
 
+    fn is_mul(&self) -> bool {
+        false
+    }
+
     fn intval(&self) -> isize {
         panic!("Invalid node")
+    }
+
+    fn flat_components(&self) -> Vec<Box<dyn Node>> {
+        self.a()
+            .map(|x| x.flat_components())
+            .unwrap_or_default()
+            .into_iter()
+            .chain(
+                self.b()
+                    .map(|x| x.flat_components())
+                    .unwrap_or_default()
+                    .into_iter(),
+            )
+            .chain(vec![self.clone()].into_iter())
+            .collect()
     }
 
     fn nodes(&self) -> Vec<&dyn Node> {
@@ -85,10 +107,6 @@ pub trait Node {
         panic!("Invalid node")
     }
 
-    fn flat_components(&self) -> Vec<&dyn Node> {
-        panic!("Invalid node")
-    }
-
     fn neg(&self) -> Box<dyn Node> {
         self.mul(num(-1).as_ref())
     }
@@ -103,8 +121,28 @@ pub trait Node {
         self.add(other.neg().as_ref())
     }
 
-    fn mul(&self, _other: &dyn Node) -> Box<dyn Node> {
-        todo!()
+    fn mul(&self, b: &dyn Node) -> Box<dyn Node> {
+        if b.is_num() {
+            match b.intval() {
+                0 => return num(0),
+                1 => return self.clone(),
+                _ => {}
+            }
+        }
+
+        if self.is_num() {
+            if b.is_num() {
+                return num(self.intval() * b.intval());
+            }
+
+            return b.mul(self.clone().as_ref());
+        }
+
+        if b.is_num() {
+            return create_node(MulNode::new(self.clone().as_ref(), b.b().unwrap()).as_ref());
+        }
+
+        create_node(MulNode::new(self.clone().as_ref(), b).as_ref())
     }
 
     fn floordiv(&self, _other: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
@@ -144,11 +182,60 @@ pub fn var(expr: &str, min: isize, max: isize) -> Box<dyn Node> {
     create_node(Var::new(expr, min, max).as_ref())
 }
 
-pub fn factorize(_nodes: &[&dyn Node]) -> Box<dyn Node> {
+pub fn factorize(_nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
     todo!()
 }
 
-pub fn sum(_nodes: &[&dyn Node]) -> Box<dyn Node> {
+pub fn sum(nodes: &[&dyn Node]) -> Box<dyn Node> {
+    let nodes = nodes
+        .iter()
+        .filter(|x| x.min() != 0 || x.max() != 0)
+        .collect::<Vec<_>>();
+    match nodes.len() {
+        0 => return num(0),
+        1 => return (*nodes[0]).clone(),
+        _ => {}
+    }
+
+    // new_nodes: List[Node] = []
+    // num_node_sum = 0
+    let mut new_nodes: Vec<Box<dyn Node>> = vec![];
+    let mut num_node_sum = 0;
+
+    for node in nodes.iter().flat_map(|x| x.flat_components()) {
+        if node.is_num() {
+            num_node_sum += node.intval();
+        } else {
+            new_nodes.push(node);
+        }
+    }
+
+    if !new_nodes.is_empty() {
+        let y = new_nodes
+            .iter()
+            .map(|x| {
+                if x.is_mul() {
+                    x.a().unwrap().render(false, false)
+                } else {
+                    x.render(false, false)
+                }
+            })
+            .collect::<HashSet<_>>();
+        if y.len() < new_nodes.len() {
+            new_nodes = vec![factorize(&new_nodes)];
+        }
+    }
+
+    if num_node_sum != 0 {
+        new_nodes.push(num(num_node_sum));
+    }
+
+    // return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
+
+    // if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes):
+    //   new_nodes = Node.factorize(new_nodes)
+    // if num_node_sum: new_nodes.append(NumNode(num_node_sum))
+
     todo!()
 }
 
@@ -185,8 +272,8 @@ impl Var {
 }
 
 impl Node for Var {
-    fn expr(&self) -> &str {
-        &self.expr
+    fn expr(&self) -> Option<&str> {
+        Some(&self.expr)
     }
 
     fn min(&self) -> isize {
@@ -241,6 +328,10 @@ impl Node for NumNode {
         self.value
     }
 
+    fn b(&self) -> Option<&dyn Node> {
+        Some(self)
+    }
+
     fn intval(&self) -> isize {
         self.value
     }
@@ -264,8 +355,8 @@ impl Node for NumNode {
 
 trait OpNode: Node {
     fn vars(&self) -> Vec<&dyn Node> {
-        let mut vars = self.a().vars();
-        vars.extend(self.b().vars());
+        let mut vars = self.a().unwrap().vars();
+        vars.extend(self.b().unwrap().vars());
         vars
     }
 }
@@ -300,12 +391,12 @@ impl LtNode {
 }
 
 impl Node for LtNode {
-    fn a(&self) -> &dyn Node {
-        self.a.as_ref()
+    fn a(&self) -> Option<&dyn Node> {
+        Some(self.a.as_ref())
     }
 
-    fn b(&self) -> &dyn Node {
-        self.b.as_ref()
+    fn b(&self) -> Option<&dyn Node> {
+        Some(self.b.as_ref())
     }
 
     fn min(&self) -> isize {
@@ -384,6 +475,10 @@ impl Node for MulNode {
 
     fn max(&self) -> isize {
         self.max
+    }
+
+    fn is_mul(&self) -> bool {
+        true
     }
 
     fn render(&self, _debug: bool, _strip_parens: bool) -> String {
