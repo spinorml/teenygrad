@@ -164,6 +164,19 @@ pub trait Node {
     }
 
     fn lt(&self, _other: &dyn Node) -> Box<dyn Node> {
+        //         lhs = self
+        // if isinstance(lhs, SumNode) and isinstance(b, int):
+        //   muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
+        //   if len(muls):
+        //     # NOTE: gcd in python 3.8 takes exactly 2 args
+        //     mul_gcd = muls[0].b
+        //     for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)
+        //     if b%mul_gcd == 0:
+        //       all_others = Variable.sum(others)
+        //       #print(mul_gcd, muls, all_others)
+        //       if all_others.min >= 0 and all_others.max < mul_gcd:
+        //         # TODO: should we divide both by mul_gcd here?
+        //         lhs = Variable.sum(muls)
         todo!()
     }
 
@@ -296,8 +309,12 @@ impl Node for Var {
         true
     }
 
-    fn render(&self, _debug: bool, _strip_parens: bool) -> String {
-        todo!()
+    fn render(&self, debug: bool, _strip_parens: bool) -> String {
+        if debug {
+            format!("{}[{}, {}]", self.expr, self.min, self.max)
+        } else {
+            self.expr.clone()
+        }
     }
 
     fn clone(&self) -> Box<dyn Node> {
@@ -407,8 +424,17 @@ impl Node for LtNode {
         Some(self.max)
     }
 
-    fn render(&self, _debug: bool, _strip_parens: bool) -> String {
-        todo!()
+    fn render(&self, debug: bool, strip_parens: bool) -> String {
+        let lparen = if strip_parens { "" } else { "(" };
+        let rparen = if strip_parens { "" } else { ")" };
+
+        format!(
+            "{}{} < {}{}",
+            lparen,
+            self.a().unwrap().render(debug, strip_parens),
+            self.b().unwrap().render(debug, strip_parens),
+            rparen
+        )
     }
 
     fn clone(&self) -> Box<dyn Node> {
@@ -486,8 +512,17 @@ impl Node for MulNode {
         true
     }
 
-    fn render(&self, _debug: bool, _strip_parens: bool) -> String {
-        todo!()
+    fn render(&self, debug: bool, strip_parens: bool) -> String {
+        let lparen = if strip_parens { "" } else { "(" };
+        let rparen = if strip_parens { "" } else { ")" };
+
+        format!(
+            "{}{}*{}{}",
+            lparen,
+            self.a().unwrap().render(debug, strip_parens),
+            self.b().unwrap().render(debug, strip_parens),
+            rparen
+        )
     }
 
     fn clone(&self) -> Box<dyn Node> {
@@ -560,8 +595,17 @@ impl Node for DivNode {
         Some(self.max)
     }
 
-    fn render(&self, _debug: bool, _strip_parens: bool) -> String {
-        todo!()
+    fn render(&self, debug: bool, strip_parens: bool) -> String {
+        let lparen = if strip_parens { "" } else { "(" };
+        let rparen = if strip_parens { "" } else { ")" };
+
+        format!(
+            "{}{}//{}{}",
+            lparen,
+            self.a().unwrap().render(debug, strip_parens),
+            self.b().unwrap().render(debug, strip_parens),
+            rparen
+        )
     }
 
     fn clone(&self) -> Box<dyn Node> {
@@ -617,8 +661,22 @@ impl Node for SumNode {
         true
     }
 
-    fn render(&self, _debug: bool, _strip_parens: bool) -> String {
-        todo!()
+    fn render(&self, debug: bool, strip_parens: bool) -> String {
+        let lparen = if strip_parens { "" } else { "(" };
+        let rparen = if strip_parens { "" } else { ")" };
+
+        let rendered_nodes = self
+            .nodes
+            .iter()
+            .map(|x| x.render(debug, strip_parens))
+            .collect::<Vec<_>>()
+            .join("+");
+
+        if strip_parens {
+            rendered_nodes
+        } else {
+            format!("{}{}{}", lparen, rendered_nodes, rparen)
+        }
     }
 
     fn clone(&self) -> Box<dyn Node> {
