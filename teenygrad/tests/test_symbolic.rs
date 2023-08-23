@@ -23,7 +23,7 @@
 use teenygrad::shape::symbolic::{ands, num, sum, var, Node};
 
 fn test_variable(v: Box<dyn Node>, min: isize, max: isize, s: &str) {
-    let (vmin, vmax) = (v.min(), v.max());
+    let (vmin, vmax) = (v.min().unwrap(), v.max().unwrap());
 
     assert_eq!(format!("{}", v.render(false, false)), s);
     assert_eq!(vmin, min);
@@ -587,7 +587,7 @@ fn test_div_into_mod() {
 fn test_numeric(fx: fn(node: Box<dyn Node>) -> Box<dyn Node>, fi: fn(val: isize) -> isize) {
     for i in 0..10 {
         let x = fx(num(i));
-        let (min, max) = (x.min(), x.max());
+        let (min, max) = (x.min().unwrap(), x.max().unwrap());
         assert_eq!(min, max);
         assert_eq!(min, fi(i));
     }
@@ -599,7 +599,7 @@ fn test_numeric(fx: fn(node: Box<dyn Node>) -> Box<dyn Node>, fi: fn(val: isize)
             }
 
             let v = fx(var("tmp", kmin, kmax));
-            let (min, max) = (v.min(), v.max());
+            let (min, max) = (v.min().unwrap(), v.max().unwrap());
 
             let values: Vec<isize> = (kmin..kmax + 1).map(&fi).collect();
             let min_value = values.iter().min().unwrap();

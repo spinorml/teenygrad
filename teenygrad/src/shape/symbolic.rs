@@ -20,10 +20,7 @@
  * SOFTWARE.
  */
 
-use std::{
-    collections::{hash_map::DefaultHasher, HashSet},
-    hash::Hasher,
-};
+use std::{collections::HashSet, vec};
 
 pub trait Node {
     fn expr(&self) -> Option<&str> {
@@ -38,9 +35,31 @@ pub trait Node {
         None
     }
 
-    fn min(&self) -> isize;
+    fn min(&self) -> Option<isize> {
+        None
+    }
 
-    fn max(&self) -> isize;
+    fn max(&self) -> Option<isize> {
+        None
+    }
+
+    fn vars(&self) -> Vec<&dyn Node> {
+        let mut v: Vec<&dyn Node> = vec![];
+
+        if let Some(a) = self.a() {
+            v.extend(a.vars());
+        }
+
+        if let Some(b) = self.b() {
+            v.extend(b.vars());
+        }
+
+        self.nodes().iter().for_each(|x| {
+            v.extend(x.vars());
+        });
+
+        v
+    }
 
     fn is_num(&self) -> bool {
         false
@@ -54,27 +73,20 @@ pub trait Node {
         false
     }
 
-    fn intval(&self) -> isize {
-        panic!("Invalid node")
+    fn is_sum(&self) -> bool {
+        false
     }
 
-    fn flat_components(&self) -> Vec<Box<dyn Node>> {
-        self.a()
-            .map(|x| x.flat_components())
-            .unwrap_or_default()
-            .into_iter()
-            .chain(
-                self.b()
-                    .map(|x| x.flat_components())
-                    .unwrap_or_default()
-                    .into_iter(),
-            )
-            .chain(vec![self.clone()].into_iter())
-            .collect()
+    fn intval(&self) -> Option<isize> {
+        None
+    }
+
+    fn as_bool(&self) -> bool {
+        !(self.min() == self.max() && self.min().unwrap() == 0)
     }
 
     fn nodes(&self) -> Vec<&dyn Node> {
-        panic!("Invalid node")
+        vec![]
     }
 
     fn render(&self, debug: bool, strip_parens: bool) -> String;
@@ -85,26 +97,12 @@ pub trait Node {
         self.render(false, false)
     }
 
-    fn hash(&self) -> u64 {
-        let mut hasher = DefaultHasher::default();
-        hasher.write(self.key().as_bytes());
-        hasher.finish()
-    }
-
     fn eq(&self, other: &dyn Node) -> bool {
         self.key() == other.key()
     }
 
-    fn as_bool(&self) -> bool {
-        !(self.min() == self.max() && self.min() == 0)
-    }
-
-    fn vars(&self) -> Vec<&dyn Node> {
-        vec![]
-    }
-
-    fn get_bounds(&self) -> (isize, isize) {
-        panic!("Invalid node")
+    fn get_bounds(&self) -> Option<(isize, isize)> {
+        None
     }
 
     fn neg(&self) -> Box<dyn Node> {
@@ -123,7 +121,7 @@ pub trait Node {
 
     fn mul(&self, b: &dyn Node) -> Box<dyn Node> {
         if b.is_num() {
-            match b.intval() {
+            match b.intval().unwrap() {
                 0 => return num(0),
                 1 => return self.clone(),
                 _ => {}
@@ -132,7 +130,7 @@ pub trait Node {
 
         if self.is_num() {
             if b.is_num() {
-                return num(self.intval() * b.intval());
+                return num(self.intval().unwrap() * b.intval().unwrap());
             }
 
             return b.mul(self.clone().as_ref());
@@ -168,6 +166,20 @@ pub trait Node {
     fn lt(&self, _other: &dyn Node) -> Box<dyn Node> {
         todo!()
     }
+
+    fn flat_components(&self) -> Vec<Box<dyn Node>> {
+        let mut components: Vec<Box<dyn Node>> = vec![];
+
+        self.nodes().iter().for_each(|x| {
+            if x.is_sum() {
+                components.extend(x.flat_components())
+            } else {
+                components.push((*x).clone());
+            }
+        });
+
+        components
+    }
 }
 
 /*------------------------------------------------------*
@@ -189,7 +201,7 @@ pub fn factorize(_nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
 pub fn sum(nodes: &[&dyn Node]) -> Box<dyn Node> {
     let nodes = nodes
         .iter()
-        .filter(|x| x.min() != 0 || x.max() != 0)
+        .filter(|x| x.min().unwrap() != 0 || x.max().unwrap() != 0)
         .collect::<Vec<_>>();
     match nodes.len() {
         0 => return num(0),
@@ -197,14 +209,12 @@ pub fn sum(nodes: &[&dyn Node]) -> Box<dyn Node> {
         _ => {}
     }
 
-    // new_nodes: List[Node] = []
-    // num_node_sum = 0
     let mut new_nodes: Vec<Box<dyn Node>> = vec![];
     let mut num_node_sum = 0;
 
     for node in nodes.iter().flat_map(|x| x.flat_components()) {
         if node.is_num() {
-            num_node_sum += node.intval();
+            num_node_sum += node.intval().unwrap();
         } else {
             new_nodes.push(node);
         }
@@ -230,22 +240,20 @@ pub fn sum(nodes: &[&dyn Node]) -> Box<dyn Node> {
         new_nodes.push(num(num_node_sum));
     }
 
-    // return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
-
-    // if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes):
-    //   new_nodes = Node.factorize(new_nodes)
-    // if num_node_sum: new_nodes.append(NumNode(num_node_sum))
-
-    todo!()
+    match new_nodes.len() {
+        0 => num(0),
+        1 => new_nodes[0].clone(),
+        _ => SumNode::new(&new_nodes),
+    }
 }
 
 pub fn ands(_nodes: &[&dyn Node]) -> Box<dyn Node> {
     todo!()
 }
 
-pub fn create_node(node: &dyn Node) -> Box<dyn Node> {
+fn create_node(node: &dyn Node) -> Box<dyn Node> {
     if node.min() == node.max() {
-        num(node.min())
+        num(node.min().unwrap())
     } else {
         node.clone()
     }
@@ -276,12 +284,12 @@ impl Node for Var {
         Some(&self.expr)
     }
 
-    fn min(&self) -> isize {
-        self.min
+    fn min(&self) -> Option<isize> {
+        Some(self.min)
     }
 
-    fn max(&self) -> isize {
-        self.max
+    fn max(&self) -> Option<isize> {
+        Some(self.max)
     }
 
     fn is_var(&self) -> bool {
@@ -320,20 +328,20 @@ impl NumNode {
 }
 
 impl Node for NumNode {
-    fn min(&self) -> isize {
-        self.value
+    fn min(&self) -> Option<isize> {
+        Some(self.value)
     }
 
-    fn max(&self) -> isize {
-        self.value
+    fn max(&self) -> Option<isize> {
+        Some(self.value)
     }
 
     fn b(&self) -> Option<&dyn Node> {
         Some(self)
     }
 
-    fn intval(&self) -> isize {
-        self.value
+    fn intval(&self) -> Option<isize> {
+        Some(self.value)
     }
 
     fn is_num(&self) -> bool {
@@ -347,17 +355,9 @@ impl Node for NumNode {
     fn clone(&self) -> Box<dyn Node> {
         Box::new(NumNode { value: self.value })
     }
-}
 
-/*------------------------------------------------------*
-| OpNode
-*-------------------------------------------------------*/
-
-trait OpNode: Node {
     fn vars(&self) -> Vec<&dyn Node> {
-        let mut vars = self.a().unwrap().vars();
-        vars.extend(self.b().unwrap().vars());
-        vars
+        vec![self]
     }
 }
 
@@ -382,7 +382,7 @@ impl LtNode {
             max: 0,
         };
 
-        let (min, max) = node.get_bounds();
+        let (min, max) = node.get_bounds().unwrap();
         node.min = min;
         node.max = max;
 
@@ -399,12 +399,12 @@ impl Node for LtNode {
         Some(self.b.as_ref())
     }
 
-    fn min(&self) -> isize {
-        self.min
+    fn min(&self) -> Option<isize> {
+        Some(self.min)
     }
 
-    fn max(&self) -> isize {
-        self.max
+    fn max(&self) -> Option<isize> {
+        Some(self.max)
     }
 
     fn render(&self, _debug: bool, _strip_parens: bool) -> String {
@@ -420,13 +420,13 @@ impl Node for LtNode {
         })
     }
 
-    fn get_bounds(&self) -> (isize, isize) {
+    fn get_bounds(&self) -> Option<(isize, isize)> {
         if self.a.max() < self.b.min() {
-            (1, 1)
+            Some((1, 1))
         } else if self.a.min() > self.b.max() {
-            (0, 0)
+            Some((0, 0))
         } else {
-            (0, 1)
+            Some((0, 1))
         }
     }
 
@@ -435,9 +435,14 @@ impl Node for LtNode {
         let y = self.b.floordiv(b, None);
         x.lt(y.as_ref())
     }
-}
 
-impl OpNode for LtNode {}
+    fn vars(&self) -> Vec<&dyn Node> {
+        let mut v: Vec<&dyn Node> = vec![];
+        v.extend(self.a().unwrap().vars());
+        v.extend(self.b().unwrap().vars());
+        v
+    }
+}
 
 /*------------------------------------------------------*
 | MulNode
@@ -460,7 +465,7 @@ impl MulNode {
             max: 0,
         };
 
-        let (min, max) = node.get_bounds();
+        let (min, max) = node.get_bounds().unwrap();
         node.min = min;
         node.max = max;
 
@@ -469,12 +474,12 @@ impl MulNode {
 }
 
 impl Node for MulNode {
-    fn min(&self) -> isize {
-        self.min
+    fn min(&self) -> Option<isize> {
+        Some(self.min)
     }
 
-    fn max(&self) -> isize {
-        self.max
+    fn max(&self) -> Option<isize> {
+        Some(self.max)
     }
 
     fn is_mul(&self) -> bool {
@@ -506,18 +511,16 @@ impl Node for MulNode {
         todo!()
     }
 
-    fn get_bounds(&self) -> (isize, isize) {
-        let b = self.b.intval();
+    fn get_bounds(&self) -> Option<(isize, isize)> {
+        let b = self.b.intval().unwrap();
 
         if b >= 0 {
-            (self.a.min() * b, self.a.max() * b)
+            Some((self.a.min().unwrap() * b, self.a.max().unwrap() * b))
         } else {
-            (self.a.max() * b, self.a.min() * b)
+            Some((self.a.max().unwrap() * b, self.a.min().unwrap() * b))
         }
     }
 }
-
-impl OpNode for MulNode {}
 
 /*------------------------------------------------------*
 | DivNode
@@ -540,7 +543,7 @@ impl DivNode {
             max: 0,
         };
 
-        let (min, max) = node.get_bounds();
+        let (min, max) = node.get_bounds().unwrap();
         node.min = min;
         node.max = max;
 
@@ -549,12 +552,12 @@ impl DivNode {
 }
 
 impl Node for DivNode {
-    fn min(&self) -> isize {
-        self.min
+    fn min(&self) -> Option<isize> {
+        Some(self.min)
     }
 
-    fn max(&self) -> isize {
-        self.max
+    fn max(&self) -> Option<isize> {
+        Some(self.max)
     }
 
     fn render(&self, _debug: bool, _strip_parens: bool) -> String {
@@ -570,11 +573,11 @@ impl Node for DivNode {
         })
     }
 
-    fn get_bounds(&self) -> (isize, isize) {
-        debug_assert!(self.a.min() >= 0);
+    fn get_bounds(&self) -> Option<(isize, isize)> {
+        debug_assert!(self.a.min().unwrap() >= 0);
 
-        let b = self.b.intval();
-        (self.a.min() / b, self.a.max() / b)
+        let b = self.b.intval().unwrap();
+        Some((self.a.min().unwrap() / b, self.a.max().unwrap() / b))
     }
 
     fn floordiv(&self, b: &dyn Node, _: Option<bool>) -> Box<dyn Node> {
@@ -582,20 +585,47 @@ impl Node for DivNode {
     }
 }
 
-impl OpNode for DivNode {}
-
 /*------------------------------------------------------*
-| RedNode
+| SumNode
 *-------------------------------------------------------*/
 
-pub trait RedNode: Node {
-    fn init(&mut self, nodes: &[&dyn Node]);
+struct SumNode {
+    nodes: Vec<Box<dyn Node>>,
+}
 
-    fn vars(&self) -> Vec<&dyn Node> {
-        let mut vars = vec![];
-        for node in self.nodes() {
-            vars.extend(node.vars());
-        }
-        vars
+impl SumNode {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
+        let node = SumNode {
+            nodes: nodes.iter().map(|x| (*x).clone()).collect(),
+        };
+
+        Box::new(node)
+    }
+}
+
+impl Node for SumNode {
+    fn min(&self) -> Option<isize> {
+        None
+    }
+
+    fn max(&self) -> Option<isize> {
+        None
+    }
+
+    fn is_sum(&self) -> bool {
+        true
+    }
+
+    fn render(&self, _debug: bool, _strip_parens: bool) -> String {
+        todo!()
+    }
+
+    fn clone(&self) -> Box<dyn Node> {
+        todo!()
+    }
+
+    fn nodes(&self) -> Vec<&dyn Node> {
+        self.nodes.iter().map(|x| x.as_ref()).collect()
     }
 }
