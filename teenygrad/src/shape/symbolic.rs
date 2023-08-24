@@ -96,7 +96,7 @@ pub trait Node {
     fn clone(&self) -> Box<dyn Node>;
 
     fn key(&self) -> String {
-        self.render(false, false)
+        self.render(true, false)
     }
 
     fn eq(&self, other: &dyn Node) -> bool {
@@ -195,13 +195,17 @@ pub trait Node {
     fn flat_components(&self) -> Vec<Box<dyn Node>> {
         let mut components: Vec<Box<dyn Node>> = vec![];
 
-        self.nodes().iter().for_each(|x| {
-            if x.is_sum() {
-                components.extend(x.flat_components())
-            } else {
-                components.push((*x).clone());
-            }
-        });
+        if self.is_sum() {
+            self.nodes().iter().for_each(|x| {
+                if x.is_sum() {
+                    components.extend(x.flat_components())
+                } else {
+                    components.push((*x).clone());
+                }
+            });
+        } else {
+            components.push(self.clone());
+        }
 
         components
     }
@@ -412,6 +416,7 @@ impl LtNode {
             min: 0,
             max: 0,
         };
+        let _k1 = node.key();
 
         let (min, max) = node.get_bounds().unwrap();
         node.min = min;
@@ -443,7 +448,7 @@ impl Node for LtNode {
         let rparen = if strip_parens { "" } else { ")" };
 
         format!(
-            "{}{} < {}{}",
+            "{}{}<{}{}",
             lparen,
             self.a().unwrap().render(debug, strip_parens),
             self.b().unwrap().render(debug, strip_parens),
@@ -461,6 +466,16 @@ impl Node for LtNode {
     }
 
     fn get_bounds(&self) -> Option<(isize, isize)> {
+        if self.b.is_num() {
+            let a_min = self.a.min().unwrap();
+            let a_max = self.a.max().unwrap();
+            let b = self.b.intval().unwrap();
+
+            let x: isize = if a_max < b { 1 } else { 0 };
+            let y: isize = if a_min < b { 1 } else { 0 };
+            return Some((x, y));
+        }
+
         if self.a.max() < self.b.min() {
             Some((1, 1))
         } else if self.a.min() > self.b.max() {
