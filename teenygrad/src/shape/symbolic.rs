@@ -139,7 +139,7 @@ pub trait Node {
         }
 
         if b.is_num() {
-            return create_node(MulNode::new(self.clone().as_ref(), b.b().unwrap()).as_ref());
+            return create_node(MulNode::new(self.clone().as_ref(), b).as_ref());
         }
 
         create_node(MulNode::new(self.clone().as_ref(), b).as_ref())
@@ -189,7 +189,7 @@ pub trait Node {
             }
         }
 
-        result
+        create_node(LtNode::new(result.as_ref(), b).as_ref())
     }
 
     fn flat_components(&self) -> Vec<Box<dyn Node>> {
@@ -277,6 +277,8 @@ pub fn ands(_nodes: &[&dyn Node]) -> Box<dyn Node> {
 }
 
 fn create_node(node: &dyn Node) -> Box<dyn Node> {
+    let (m1, m2) = (node.min(), node.max());
+
     if node.min() == node.max() {
         num(node.min().unwrap())
     } else {
@@ -512,6 +514,14 @@ impl MulNode {
 }
 
 impl Node for MulNode {
+    fn a(&self) -> Option<&dyn Node> {
+        Some(self.a.as_ref())
+    }
+
+    fn b(&self) -> Option<&dyn Node> {
+        Some(self.b.as_ref())
+    }
+
     fn min(&self) -> Option<isize> {
         Some(self.min)
     }
