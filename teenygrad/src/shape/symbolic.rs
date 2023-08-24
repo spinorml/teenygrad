@@ -22,6 +22,8 @@
 
 use std::{collections::HashSet, vec};
 
+use crate::helpers::{gcd, partition};
+
 pub trait Node {
     fn expr(&self) -> Option<&str> {
         None
@@ -163,21 +165,31 @@ pub trait Node {
         self.neg().lt(other.neg().add(num(1).as_ref()).as_ref())
     }
 
-    fn lt(&self, _other: &dyn Node) -> Box<dyn Node> {
-        //         lhs = self
-        // if isinstance(lhs, SumNode) and isinstance(b, int):
-        //   muls, others = partition(lhs.nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
-        //   if len(muls):
-        //     # NOTE: gcd in python 3.8 takes exactly 2 args
-        //     mul_gcd = muls[0].b
-        //     for x in muls[1:]: mul_gcd = gcd(mul_gcd, x.b)
-        //     if b%mul_gcd == 0:
-        //       all_others = Variable.sum(others)
-        //       #print(mul_gcd, muls, all_others)
-        //       if all_others.min >= 0 and all_others.max < mul_gcd:
-        //         # TODO: should we divide both by mul_gcd here?
-        //         lhs = Variable.sum(muls)
-        todo!()
+    fn lt(&self, b: &dyn Node) -> Box<dyn Node> {
+        let mut result = self.clone();
+
+        if result.is_sum() && result.b().unwrap().is_num() {
+            let nodes = result.nodes();
+            let (muls, others) = partition(nodes.as_slice(), |x| {
+                x.is_mul() && x.b().unwrap().intval().unwrap() > 0 && x.max().unwrap() >= 0
+            });
+
+            if !muls.is_empty() {
+                let mut mul_gcd = muls.get(0).unwrap().b().unwrap().intval().unwrap();
+                for x in muls.iter().skip(1) {
+                    mul_gcd = gcd(mul_gcd, x.b().unwrap().intval().unwrap());
+                }
+
+                if b.modulus(num(mul_gcd).as_ref()).intval().unwrap() == 0 {
+                    let all_others = sum(others.iter().map(|x| **x).collect::<Vec<_>>().as_slice());
+                    if all_others.min().unwrap() >= 0 && all_others.max().unwrap() < mul_gcd {
+                        result = sum(muls.iter().map(|x| **x).collect::<Vec<_>>().as_slice());
+                    }
+                }
+            }
+        }
+
+        result
     }
 
     fn flat_components(&self) -> Vec<Box<dyn Node>> {
@@ -515,12 +527,14 @@ impl Node for MulNode {
     fn render(&self, debug: bool, strip_parens: bool) -> String {
         let lparen = if strip_parens { "" } else { "(" };
         let rparen = if strip_parens { "" } else { ")" };
+        let a = self.a();
+        let b = self.b();
 
         format!(
             "{}{}*{}{}",
             lparen,
-            self.a().unwrap().render(debug, strip_parens),
-            self.b().unwrap().render(debug, strip_parens),
+            a.unwrap().render(debug, strip_parens),
+            b.unwrap().render(debug, strip_parens),
             rparen
         )
     }
