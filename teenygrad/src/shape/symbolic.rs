@@ -145,8 +145,38 @@ pub trait Node {
         create_node(MulNode::new(self.clone().as_ref(), b).as_ref())
     }
 
-    fn floordiv(&self, _other: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
-        todo!()
+    fn floordiv(&self, b: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
+        if !b.is_num() {
+            if self.key() == b.key() {
+                return num(1);
+            }
+
+            if (b.sub(self.clone().as_ref()).min().unwrap() > 0) && (self.min().unwrap() >= 0) {
+                return num(0);
+            }
+
+            panic!("Not supported: {}//{}", self.key(), b.key());
+        }
+
+        let b_val = b.intval().unwrap();
+
+        if b_val < 0 {
+            return self.floordiv(b.neg().as_ref(), None).neg();
+        }
+
+        if b_val == 1 {
+            return self.clone();
+        }
+
+        if self.min().unwrap() < 0 {
+            let offset = self.min().unwrap() / b_val;
+            return self
+                .add(num(-offset * b_val).as_ref())
+                .floordiv(b, None)
+                .add(num(offset).as_ref());
+        }
+
+        create_node(DivNode::new(self.clone().as_ref(), b).as_ref())
     }
 
     fn modulus(&self, _other: &dyn Node) -> Box<dyn Node> {
@@ -281,8 +311,6 @@ pub fn ands(_nodes: &[&dyn Node]) -> Box<dyn Node> {
 }
 
 fn create_node(node: &dyn Node) -> Box<dyn Node> {
-    let (m1, m2) = (node.min(), node.max());
-
     if node.min() == node.max() {
         num(node.min().unwrap())
     } else {
