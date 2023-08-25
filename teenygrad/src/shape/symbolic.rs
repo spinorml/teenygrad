@@ -747,7 +747,9 @@ impl Node for SumNode {
     }
 
     fn clone(&self) -> Box<dyn Node> {
-        todo!()
+        Box::new(SumNode {
+            nodes: self.nodes.iter().map(|x| (*x).clone()).collect(),
+        })
     }
 
     fn nodes(&self) -> Vec<&dyn Node> {
