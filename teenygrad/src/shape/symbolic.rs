@@ -138,10 +138,6 @@ pub trait Node {
             return b.mul(self.clone().as_ref());
         }
 
-        if b.is_num() {
-            return create_node(MulNode::new(self.clone().as_ref(), b).as_ref());
-        }
-
         create_node(MulNode::new(self.clone().as_ref(), b).as_ref())
     }
 
@@ -179,8 +175,43 @@ pub trait Node {
         create_node(DivNode::new(self.clone().as_ref(), b).as_ref())
     }
 
-    fn modulus(&self, _other: &dyn Node) -> Box<dyn Node> {
-        todo!()
+    fn modulus(&self, b: &dyn Node) -> Box<dyn Node> {
+        if self.key() == b.key() {
+            return num(0);
+        }
+
+        if b.is_num() {
+            let b_val = b.intval().unwrap();
+            if b_val == 1 {
+                return num(0);
+            }
+
+            if self.min().unwrap() >= 0 && self.max().unwrap() < b_val {
+                return self.clone();
+            }
+
+            if self.min().unwrap() < 0 {
+                let x = (self.min().unwrap() / b_val) * b_val;
+                return self.sub(num(x).as_ref()).modulus(b);
+            }
+
+            return create_node(ModNode::new(self.clone().as_ref(), b).as_ref());
+        } else {
+            if b.sub(self.clone().as_ref()).min().unwrap() > 0 && self.min().unwrap() >= 0 {
+                return self.clone();
+            }
+            panic!("Not supported: {} % {}", self.key(), b.key());
+        }
+        //         if isinstance(b, Node):
+        //   if b.__class__ is NumNode: return self % b.b
+        //   if self == b: return NumNode(0)
+        //   if (b - self).min > 0 and self.min >= 0: return self # b - self simplifies the node
+        //   raise RuntimeError(f"not supported: {self} % {b}")
+        // assert b > 0
+        // if b == 1: return NumNode(0)
+        // if self.min >= 0 and self.max < b: return self
+        // if self.min < 0: return (self - ((self.min//b)*b)) % b
+        // return create_node(ModNode(self, b))
     }
 
     fn le(&self, other: &dyn Node) -> Box<dyn Node> {
@@ -198,7 +229,7 @@ pub trait Node {
     fn lt(&self, b: &dyn Node) -> Box<dyn Node> {
         let mut result = self.clone();
 
-        if result.is_sum() && result.b().unwrap().is_num() {
+        if result.is_sum() && b.is_num() {
             let nodes = result.nodes();
             let (muls, others) = partition(nodes.as_slice(), |x| {
                 x.is_mul() && x.b().unwrap().intval().unwrap() > 0 && x.max().unwrap() >= 0
@@ -330,6 +361,12 @@ pub struct Var {
 impl Var {
     #[allow(clippy::new_ret_no_self)]
     pub fn new(expr: &str, min: isize, max: isize) -> Box<dyn Node> {
+        debug_assert!(min >= 0 && min <= max);
+
+        if min == max {
+            return num(min);
+        }
+
         Box::new(Var {
             expr: expr.to_string(),
             min,
@@ -495,6 +532,7 @@ impl Node for LtNode {
 
     fn get_bounds(&self) -> Option<(isize, isize)> {
         if self.b.is_num() {
+            print!("LtNode::get_bounds: {}", self.key());
             let a_min = self.a.min().unwrap();
             let a_max = self.a.max().unwrap();
             let b = self.b.intval().unwrap();
@@ -602,7 +640,7 @@ impl Node for MulNode {
     }
 
     fn mul(&self, b: &dyn Node) -> Box<dyn Node> {
-        self.a.mul(b).lt(self.b.mul(b).as_ref())
+        self.a.mul(self.b.mul(b).as_ref())
     }
 
     fn floordiv(&self, _other: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
@@ -693,6 +731,86 @@ impl Node for DivNode {
 
     fn floordiv(&self, b: &dyn Node, _: Option<bool>) -> Box<dyn Node> {
         self.a.floordiv(self.b.mul(b).as_ref(), None)
+    }
+}
+
+/*------------------------------------------------------*
+| ModNode
+*-------------------------------------------------------*/
+
+pub struct ModNode {
+    a: Box<dyn Node>,
+    b: Box<dyn Node>,
+    min: isize,
+    max: isize,
+}
+
+impl ModNode {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(a: &dyn Node, b: &dyn Node) -> Box<dyn Node> {
+        let mut node = DivNode {
+            a: a.clone(),
+            b: b.clone(),
+            min: 0,
+            max: 0,
+        };
+
+        let (min, max) = node.get_bounds().unwrap();
+        node.min = min;
+        node.max = max;
+
+        Box::new(node)
+    }
+}
+
+impl Node for ModNode {
+    fn min(&self) -> Option<isize> {
+        Some(self.min)
+    }
+
+    fn max(&self) -> Option<isize> {
+        Some(self.max)
+    }
+
+    fn render(&self, debug: bool, strip_parens: bool) -> String {
+        let lparen = if strip_parens { "" } else { "(" };
+        let rparen = if strip_parens { "" } else { ")" };
+
+        format!(
+            "{}{}%{}{}",
+            lparen,
+            self.a().unwrap().render(debug, strip_parens),
+            self.b().unwrap().render(debug, strip_parens),
+            rparen
+        )
+    }
+
+    fn clone(&self) -> Box<dyn Node> {
+        Box::new(ModNode {
+            a: self.a.clone(),
+            b: self.b.clone(),
+            min: self.min,
+            max: self.max,
+        })
+    }
+
+    fn get_bounds(&self) -> Option<(isize, isize)> {
+        debug_assert!(self.a.min().unwrap() >= 0);
+        debug_assert!(self.b().unwrap().is_num());
+
+        let b = self.b.intval().unwrap();
+        let (a_min, a_max) = (self.min().unwrap(), self.max().unwrap());
+        let self_b_intval = self.b.intval().unwrap();
+
+        if a_max - a_min >= self_b_intval || (a_min != a_max && a_min % b >= a_max % b) {
+            Some((0, self_b_intval - 1))
+        } else {
+            Some((a_min % self_b_intval, a_max % self_b_intval))
+        }
+    }
+
+    fn floordiv(&self, _b: &dyn Node, _: Option<bool>) -> Box<dyn Node> {
+        todo!("ModNode::floordiv")
     }
 }
 
