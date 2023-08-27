@@ -176,27 +176,24 @@ pub trait Node {
     }
 
     fn modulus(&self, b: &dyn Node) -> Box<dyn Node> {
-        if self.is_num() && b.is_num() {
-            let self_intval = self.intval().unwrap();
+        if b.is_num() {
             let b_intval = b.intval().unwrap();
-            return num(self_intval % b_intval);
+            match b_intval {
+                1 => return num(0),
+                _ => {
+                    if self.is_num() {
+                        let self_intval = self.intval().unwrap();
+                        return num(self_intval % b_intval);
+                    }
+                }
+            }
         }
 
         if self.key() == b.key() {
             return num(0);
         }
 
-        todo!("Node::modulus")
-        //         if isinstance(b, Node):
-        //   if b.__class__ is NumNode: return self % b.b
-        //   if self == b: return NumNode(0)
-        //   if (b - self).min > 0 and self.min >= 0: return self # b - self simplifies the node
-        //   raise RuntimeError(f"not supported: {self} % {b}")
-        // assert b > 0
-        // if b == 1: return NumNode(0)
-        // if self.min >= 0 and self.max < b: return self
-        // if self.min < 0: return (self - ((self.min//b)*b)) % b
-        // return create_node(ModNode(self, b))
+        create_node(ModNode::new(self.clone().as_ref(), b).as_ref())
     }
 
     fn le(&self, other: &dyn Node) -> Box<dyn Node> {
