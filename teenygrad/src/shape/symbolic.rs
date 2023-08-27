@@ -176,32 +176,17 @@ pub trait Node {
     }
 
     fn modulus(&self, b: &dyn Node) -> Box<dyn Node> {
+        if self.is_num() && b.is_num() {
+            let self_intval = self.intval().unwrap();
+            let b_intval = b.intval().unwrap();
+            return num(self_intval % b_intval);
+        }
+
         if self.key() == b.key() {
             return num(0);
         }
 
-        if b.is_num() {
-            let b_val = b.intval().unwrap();
-            if b_val == 1 {
-                return num(0);
-            }
-
-            if self.min().unwrap() >= 0 && self.max().unwrap() < b_val {
-                return self.clone();
-            }
-
-            if self.min().unwrap() < 0 {
-                let x = (self.min().unwrap() / b_val) * b_val;
-                return self.sub(num(x).as_ref()).modulus(b);
-            }
-
-            return create_node(ModNode::new(self.clone().as_ref(), b).as_ref());
-        } else {
-            if b.sub(self.clone().as_ref()).min().unwrap() > 0 && self.min().unwrap() >= 0 {
-                return self.clone();
-            }
-            panic!("Not supported: {} % {}", self.key(), b.key());
-        }
+        todo!("Node::modulus")
         //         if isinstance(b, Node):
         //   if b.__class__ is NumNode: return self % b.b
         //   if self == b: return NumNode(0)
@@ -285,7 +270,7 @@ pub fn var(expr: &str, min: isize, max: isize) -> Box<dyn Node> {
 }
 
 pub fn factorize(_nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
-    todo!()
+    todo!("factorize")
 }
 
 pub fn sum(nodes: &[&dyn Node]) -> Box<dyn Node> {
@@ -315,9 +300,9 @@ pub fn sum(nodes: &[&dyn Node]) -> Box<dyn Node> {
             .iter()
             .map(|x| {
                 if x.is_mul() {
-                    x.a().unwrap().render(false, false)
+                    x.a().unwrap().render(true, false)
                 } else {
-                    x.render(false, false)
+                    x.render(true, false)
                 }
             })
             .collect::<HashSet<_>>();
@@ -338,7 +323,7 @@ pub fn sum(nodes: &[&dyn Node]) -> Box<dyn Node> {
 }
 
 pub fn ands(_nodes: &[&dyn Node]) -> Box<dyn Node> {
-    todo!()
+    todo!("ands")
 }
 
 fn create_node(node: &dyn Node) -> Box<dyn Node> {
@@ -533,6 +518,8 @@ impl Node for LtNode {
     fn get_bounds(&self) -> Option<(isize, isize)> {
         if self.b.is_num() {
             print!("LtNode::get_bounds: {}", self.key());
+            print!("LtNode::a: {}", self.a.key());
+            print!("LtNode::a-min: {:?}", self.a.min());
             let a_min = self.a.min().unwrap();
             let a_max = self.a.max().unwrap();
             let b = self.b.intval().unwrap();
@@ -644,11 +631,14 @@ impl Node for MulNode {
     }
 
     fn floordiv(&self, _other: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
-        todo!()
+        // if self.b % b == 0: return self.a*(self.b//b)
+        // if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
+        // return Node.__floordiv__(self, b, factoring_allowed)
+        todo!("MulNode::floordiv")
     }
 
     fn modulus(&self, _other: &dyn Node) -> Box<dyn Node> {
-        todo!()
+        todo!("MulNode::modulus")
     }
 
     fn get_bounds(&self) -> Option<(isize, isize)> {
@@ -820,6 +810,8 @@ impl Node for ModNode {
 
 struct SumNode {
     nodes: Vec<Box<dyn Node>>,
+    min: isize,
+    max: isize,
 }
 
 impl SumNode {
@@ -827,6 +819,8 @@ impl SumNode {
     pub fn new(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
         let node = SumNode {
             nodes: nodes.iter().map(|x| (*x).clone()).collect(),
+            min: nodes.iter().map(|x| x.min().unwrap()).sum(),
+            max: nodes.iter().map(|x| x.max().unwrap()).sum(),
         };
 
         Box::new(node)
@@ -835,11 +829,11 @@ impl SumNode {
 
 impl Node for SumNode {
     fn min(&self) -> Option<isize> {
-        None
+        Some(self.min)
     }
 
     fn max(&self) -> Option<isize> {
-        None
+        Some(self.max)
     }
 
     fn is_sum(&self) -> bool {
@@ -867,6 +861,8 @@ impl Node for SumNode {
     fn clone(&self) -> Box<dyn Node> {
         Box::new(SumNode {
             nodes: self.nodes.iter().map(|x| (*x).clone()).collect(),
+            min: self.min,
+            max: self.max,
         })
     }
 

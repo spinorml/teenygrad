@@ -61,12 +61,12 @@ fn test_ge_divides() {
         .lt(num(512).as_ref());
 
     test_variable(expr.clone(), 0, 1, "((idx*4)<512)");
-    // test_variable(
-    //     expr.floordiv(num(4).as_ref(), Some(false)),
-    //     0,
-    //     1,
-    //     "(idx<128)",
-    // );
+    test_variable(
+        expr.floordiv(num(4).as_ref(), Some(false)),
+        0,
+        1,
+        "(idx<128)",
+    );
 }
 
 #[test]
