@@ -141,38 +141,12 @@ pub trait Node {
         create_node(MulNode::new(self.clone().as_ref(), b).as_ref())
     }
 
-    fn floordiv(&self, b: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
-        if !b.is_num() {
-            if self.key() == b.key() {
-                return num(1);
-            }
-
-            if (b.sub(self.clone().as_ref()).min().unwrap() > 0) && (self.min().unwrap() >= 0) {
-                return num(0);
-            }
-
-            panic!("Not supported: {}//{}", self.key(), b.key());
+    fn floordiv(&self, b: &dyn Node, facatoring_allowed: Option<bool>) -> Box<dyn Node> {
+        if self.is_num() && b.is_num() {
+            return num(self.intval().unwrap() / b.intval().unwrap());
         }
 
-        let b_val = b.intval().unwrap();
-
-        if b_val < 0 {
-            return self.floordiv(b.neg().as_ref(), None).neg();
-        }
-
-        if b_val == 1 {
-            return self.clone();
-        }
-
-        if self.min().unwrap() < 0 {
-            let offset = self.min().unwrap() / b_val;
-            return self
-                .add(num(-offset * b_val).as_ref())
-                .floordiv(b, None)
-                .add(num(offset).as_ref());
-        }
-
-        create_node(DivNode::new(self.clone().as_ref(), b).as_ref())
+        node_floordiv(self.clone().as_ref(), b, facatoring_allowed)
     }
 
     fn modulus(&self, b: &dyn Node) -> Box<dyn Node> {
@@ -252,6 +226,22 @@ pub trait Node {
 
         components
     }
+}
+
+fn node_floordiv(a: &dyn Node, b: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
+    if b.is_num() {
+        let b_intval = b.intval().unwrap();
+        if b_intval == 1 {
+            return a.clone();
+        }
+
+        if a.is_num() {
+            let a_intval = a.intval().unwrap();
+            return num(a_intval / b_intval);
+        }
+    }
+
+    create_node(DivNode::new(a.clone().as_ref(), b).as_ref())
 }
 
 /*------------------------------------------------------*
@@ -463,7 +453,6 @@ impl LtNode {
             min: 0,
             max: 0,
         };
-        let _k1 = node.key();
 
         let (min, max) = node.get_bounds().unwrap();
         node.min = min;
@@ -497,8 +486,8 @@ impl Node for LtNode {
         format!(
             "{}{}<{}{}",
             lparen,
-            self.a().unwrap().render(debug, strip_parens),
-            self.b().unwrap().render(debug, strip_parens),
+            self.a.render(debug, strip_parens),
+            self.b.render(debug, strip_parens),
             rparen
         )
     }
@@ -514,11 +503,7 @@ impl Node for LtNode {
 
     fn get_bounds(&self) -> Option<(isize, isize)> {
         if self.b.is_num() {
-            print!("LtNode::get_bounds: {}", self.key());
-            print!("LtNode::a: {}", self.a.key());
-            print!("LtNode::a-min: {:?}", self.a.min());
-            let a_min = self.a.min().unwrap();
-            let a_max = self.a.max().unwrap();
+            let (a_min, a_max) = (self.a.min().unwrap(), self.a.max().unwrap());
             let b = self.b.intval().unwrap();
 
             let x: isize = if a_max < b { 1 } else { 0 };
@@ -536,7 +521,7 @@ impl Node for LtNode {
     }
 
     fn floordiv(&self, b: &dyn Node, _: Option<bool>) -> Box<dyn Node> {
-        let x = self.a.floordiv(self.b.as_ref(), None);
+        let x = self.a.floordiv(b, None);
         let y = self.b.floordiv(b, None);
         x.lt(y.as_ref())
     }
@@ -627,11 +612,21 @@ impl Node for MulNode {
         self.a.mul(self.b.mul(b).as_ref())
     }
 
-    fn floordiv(&self, _other: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
-        // if self.b % b == 0: return self.a*(self.b//b)
-        // if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
-        // return Node.__floordiv__(self, b, factoring_allowed)
-        todo!("MulNode::floordiv")
+    fn floordiv(&self, b: &dyn Node, facatoring_allowed: Option<bool>) -> Box<dyn Node> {
+        let x = self.b.modulus(b);
+        if x.is_num() && x.intval().unwrap() == 0 {
+            return self.a.mul(self.b.floordiv(b, None).as_ref());
+        }
+
+        let x = b.modulus(self.b.as_ref());
+        if x.is_num() && x.intval().unwrap() == 0 && self.b.is_num() && self.b.intval().unwrap() > 0
+        {
+            return self
+                .a
+                .floordiv(b.floordiv(self.b.as_ref(), None).as_ref(), None);
+        }
+
+        node_floordiv(self.clone().as_ref(), b, facatoring_allowed) // if self.b % b == 0: return self.a*(self.b//b)
     }
 
     fn modulus(&self, _other: &dyn Node) -> Box<dyn Node> {
@@ -694,8 +689,8 @@ impl Node for DivNode {
         format!(
             "{}{}//{}{}",
             lparen,
-            self.a().unwrap().render(debug, strip_parens),
-            self.b().unwrap().render(debug, strip_parens),
+            self.a.render(debug, strip_parens),
+            self.b.render(debug, strip_parens),
             rparen
         )
     }
