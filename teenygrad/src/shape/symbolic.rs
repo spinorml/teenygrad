@@ -79,6 +79,10 @@ pub trait Node {
         false
     }
 
+    fn is_and(&self) -> bool {
+        false
+    }
+
     fn intval(&self) -> Option<isize> {
         None
     }
@@ -309,8 +313,35 @@ pub fn sum(nodes: &[&dyn Node]) -> Box<dyn Node> {
     }
 }
 
-pub fn ands(_nodes: &[&dyn Node]) -> Box<dyn Node> {
-    todo!("ands")
+pub fn ands(nodes: &[&dyn Node]) -> Box<dyn Node> {
+    //     if not nodes: return NumNode(1)
+    // if len(nodes) == 1: return nodes[0]
+    // if any(not x for x in nodes): return NumNode(0)
+
+    // # filter 1s
+    // nodes = [x for x in nodes if x.min != x.max]
+    // return create_rednode(AndNode, nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
+
+    match nodes.len() {
+        0 => return num(1),
+        1 => return (*nodes[0]).clone(),
+        _ => (),
+    }
+
+    if nodes.iter().any(|x| !x.as_bool()) {
+        return num(0);
+    }
+
+    let nodes = nodes
+        .iter()
+        .filter(|x| x.min() != x.max())
+        .map(|x| (*x).clone())
+        .collect::<Vec<_>>();
+
+    match nodes.len() {
+        1 => nodes[0].clone(),
+        _ => AndNode::new(&nodes),
+    }
 }
 
 fn create_node(node: &dyn Node) -> Box<dyn Node> {
@@ -860,5 +891,96 @@ impl Node for SumNode {
 
     fn nodes(&self) -> Vec<&dyn Node> {
         self.nodes.iter().map(|x| x.as_ref()).collect()
+    }
+
+    fn mul(&self, _b: &dyn Node) -> Box<dyn Node> {
+        todo!("SumNode::mul")
+    }
+
+    fn floordiv(&self, _b: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
+        todo!("SumNode::floordiv")
+    }
+
+    fn modulus(&self, _b: &dyn Node) -> Box<dyn Node> {
+        todo!("SumNode::modulus")
+    }
+}
+
+/*------------------------------------------------------*
+| AndNode
+*-------------------------------------------------------*/
+
+struct AndNode {
+    nodes: Vec<Box<dyn Node>>,
+    min: isize,
+    max: isize,
+}
+
+impl AndNode {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
+        let node = AndNode {
+            nodes: nodes.iter().map(|x| (*x).clone()).collect(),
+            min: nodes.iter().map(|x| x.min().unwrap()).min().unwrap_or(0),
+            max: nodes.iter().map(|x| x.max().unwrap()).max().unwrap_or(0),
+        };
+
+        create_node(&node)
+    }
+}
+
+impl Node for AndNode {
+    fn min(&self) -> Option<isize> {
+        Some(self.min)
+    }
+
+    fn max(&self) -> Option<isize> {
+        Some(self.max)
+    }
+
+    fn is_and(&self) -> bool {
+        true
+    }
+
+    fn render(&self, debug: bool, strip_parens: bool) -> String {
+        let lparen = if strip_parens { "" } else { "(" };
+        let rparen = if strip_parens { "" } else { ")" };
+
+        let rendered_nodes = self
+            .nodes
+            .iter()
+            .map(|x| x.render(debug, strip_parens))
+            .collect::<Vec<_>>()
+            .join(" and ");
+
+        if strip_parens {
+            rendered_nodes
+        } else {
+            format!("{}{}{}", lparen, rendered_nodes, rparen)
+        }
+    }
+
+    fn clone(&self) -> Box<dyn Node> {
+        Box::new(AndNode {
+            nodes: self.nodes.iter().map(|x| (*x).clone()).collect(),
+            min: self.min,
+            max: self.max,
+        })
+    }
+
+    fn nodes(&self) -> Vec<&dyn Node> {
+        self.nodes.iter().map(|x| x.as_ref()).collect()
+    }
+
+    fn floordiv(&self, b: &dyn Node, facatoring_allowed: Option<bool>) -> Box<dyn Node> {
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|x| x.floordiv(b, facatoring_allowed))
+            .collect::<Vec<_>>();
+
+        let nodes = nodes.iter().map(|x| x.as_ref()).collect::<Vec<_>>();
+
+        ands(&nodes)
     }
 }

@@ -79,6 +79,7 @@ fn test_ge_divides_and() {
         .add(var("FLOAT4_INDEX", 0, 3).as_ref())
         .lt(num(512).as_ref());
     let expr = ands(&[a.as_ref(), b.as_ref()]);
+    println!("{}", expr.render(true, false));
     let x = expr.floordiv(num(4).as_ref(), None);
 
     test_variable(x, 0, 1, "((idx1<128) and (idx2<128))");
