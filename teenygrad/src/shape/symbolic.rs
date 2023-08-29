@@ -893,11 +893,49 @@ impl Node for SumNode {
         self.nodes.iter().map(|x| x.as_ref()).collect()
     }
 
-    fn mul(&self, _b: &dyn Node) -> Box<dyn Node> {
-        todo!("SumNode::mul")
+    fn mul(&self, b: &dyn Node) -> Box<dyn Node> {
+        let nodes = self.nodes.iter().map(|x| x.mul(b)).collect::<Vec<_>>();
+        sum(nodes
+            .iter()
+            .map(|x| x.as_ref())
+            .collect::<Vec<_>>()
+            .as_slice())
     }
 
-    fn floordiv(&self, _b: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
+    fn floordiv(&self, _b: &dyn Node, facatoring_allowed: Option<bool>) -> Box<dyn Node> {
+        let facatoring_allowed = facatoring_allowed.unwrap_or(true);
+
+        //         fully_divided: List[Node] = []
+        // rest: List[Node] = []
+        // if isinstance(b, SumNode):
+        //   nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
+        //   de_num = sum(node.b for node in b.flat_components if node.__class__ is NumNode)
+        //   if nu_num > 0 and de_num and (d:=nu_num//de_num) > 0: return NumNode(d) + (self-b*d) // b
+        // if isinstance(b, Node):
+        //   for x in self.flat_components:
+        //     if x % b == 0: fully_divided.append(x // b)
+        //     else: rest.append(x)
+        //   if (sum_fully_divided:=create_rednode(SumNode, fully_divided)) != 0: return sum_fully_divided + create_rednode(SumNode, rest) // b
+        //   return Node.__floordiv__(self, b, False)
+        // if b == 1: return self
+        // if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
+        // fully_divided, rest = [], []
+        // _gcd = b
+        // divisor = 1
+        // for x in self.flat_components:
+        //   if x.__class__ in (NumNode, MulNode):
+        //     if x.b%b == 0: fully_divided.append(x//b)
+        //     else:
+        //       rest.append(x)
+        //       _gcd = gcd(_gcd, x.b)
+        //       if x.__class__ == MulNode and divisor == 1 and b%x.b == 0: divisor = x.b
+        //   else:
+        //     rest.append(x)
+        //     _gcd = 1
+        // if _gcd > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(_gcd) // (b//_gcd)
+        // if divisor > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(divisor) // (b//divisor)
+        // return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
+
         todo!("SumNode::floordiv")
     }
 
