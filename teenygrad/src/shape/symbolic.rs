@@ -20,9 +20,7 @@
  * SOFTWARE.
  */
 
-use std::{collections::HashSet, vec};
-
-use crate::helpers::{gcd, partition};
+use std::vec;
 
 pub trait Node {
     fn expr(&self) -> Option<&str> {
@@ -111,106 +109,48 @@ pub trait Node {
         None
     }
 
+    fn simplify(&self) -> Box<dyn Node>;
+
     fn neg(&self) -> Box<dyn Node> {
-        self.mul(num(-1).as_ref())
+        self.mul(num(-1))
     }
 
-    fn add(&self, other: &dyn Node) -> Box<dyn Node> {
+    fn add(&self, other: Box<dyn Node>) -> Box<dyn Node> {
         let tmp1 = self.clone();
 
-        sum(&[tmp1.as_ref(), other])
+        sum(&[tmp1, other])
     }
 
-    fn sub(&self, other: &dyn Node) -> Box<dyn Node> {
-        self.add(other.neg().as_ref())
+    fn sub(&self, other: Box<dyn Node>) -> Box<dyn Node> {
+        self.add(other.neg())
     }
 
-    fn mul(&self, b: &dyn Node) -> Box<dyn Node> {
-        if b.is_num() {
-            match b.intval().unwrap() {
-                0 => return num(0),
-                1 => return self.clone(),
-                _ => {}
-            }
-        }
-
-        if self.is_num() {
-            if b.is_num() {
-                return num(self.intval().unwrap() * b.intval().unwrap());
-            }
-
-            return b.mul(self.clone().as_ref());
-        }
-
-        create_node(MulNode::new(self.clone().as_ref(), b).as_ref())
+    fn mul(&self, b: Box<dyn Node>) -> Box<dyn Node> {
+        MulNode::new(self.clone(), b)
     }
 
-    fn floordiv(&self, b: &dyn Node, facatoring_allowed: Option<bool>) -> Box<dyn Node> {
-        if self.is_num() && b.is_num() {
-            return num(self.intval().unwrap() / b.intval().unwrap());
-        }
-
-        node_floordiv(self.clone().as_ref(), b, facatoring_allowed)
+    fn floordiv(&self, b: Box<dyn Node>, factoring_allowed: Option<bool>) -> Box<dyn Node> {
+        DivNode::new(self.clone(), b, factoring_allowed.unwrap_or(true))
     }
 
-    fn modulus(&self, b: &dyn Node) -> Box<dyn Node> {
-        if b.is_num() {
-            let b_intval = b.intval().unwrap();
-            match b_intval {
-                1 => return num(0),
-                _ => {
-                    if self.is_num() {
-                        let self_intval = self.intval().unwrap();
-                        return num(self_intval % b_intval);
-                    }
-                }
-            }
-        }
-
-        if self.key() == b.key() {
-            return num(0);
-        }
-
-        create_node(ModNode::new(self.clone().as_ref(), b).as_ref())
+    fn modulus(&self, b: Box<dyn Node>) -> Box<dyn Node> {
+        ModNode::new(self.clone(), b)
     }
 
     fn le(&self, other: &dyn Node) -> Box<dyn Node> {
-        self.lt(other.add(num(1).as_ref()).as_ref())
+        self.lt(other.add(num(1)))
     }
 
     fn gt(&self, other: &dyn Node) -> Box<dyn Node> {
         self.neg().le(other.neg().as_ref())
     }
 
-    fn ge(&self, other: &dyn Node) -> Box<dyn Node> {
-        self.neg().lt(other.neg().add(num(1).as_ref()).as_ref())
+    fn ge(&self, other: Box<dyn Node>) -> Box<dyn Node> {
+        self.neg().lt(other.neg().add(num(1)))
     }
 
-    fn lt(&self, b: &dyn Node) -> Box<dyn Node> {
-        let mut result = self.clone();
-
-        if result.is_sum() && b.is_num() {
-            let nodes = result.nodes();
-            let (muls, others) = partition(nodes.as_slice(), |x| {
-                x.is_mul() && x.b().unwrap().intval().unwrap() > 0 && x.max().unwrap() >= 0
-            });
-
-            if !muls.is_empty() {
-                let mut mul_gcd = muls.get(0).unwrap().b().unwrap().intval().unwrap();
-                for x in muls.iter().skip(1) {
-                    mul_gcd = gcd(mul_gcd, x.b().unwrap().intval().unwrap());
-                }
-
-                if b.modulus(num(mul_gcd).as_ref()).intval().unwrap() == 0 {
-                    let all_others = sum(others.iter().map(|x| **x).collect::<Vec<_>>().as_slice());
-                    if all_others.min().unwrap() >= 0 && all_others.max().unwrap() < mul_gcd {
-                        result = sum(muls.iter().map(|x| **x).collect::<Vec<_>>().as_slice());
-                    }
-                }
-            }
-        }
-
-        create_node(LtNode::new(result.as_ref(), b).as_ref())
+    fn lt(&self, b: Box<dyn Node>) -> Box<dyn Node> {
+        LtNode::new(self.clone(), b)
     }
 
     fn flat_components(&self) -> Vec<Box<dyn Node>> {
@@ -232,22 +172,6 @@ pub trait Node {
     }
 }
 
-fn node_floordiv(a: &dyn Node, b: &dyn Node, _facatoring_allowed: Option<bool>) -> Box<dyn Node> {
-    if b.is_num() {
-        let b_intval = b.intval().unwrap();
-        if b_intval == 1 {
-            return a.clone();
-        }
-
-        if a.is_num() {
-            let a_intval = a.intval().unwrap();
-            return num(a_intval / b_intval);
-        }
-    }
-
-    create_node(DivNode::new(a.clone().as_ref(), b).as_ref())
-}
-
 /*------------------------------------------------------*
 | Utility functions
 *-------------------------------------------------------*/
@@ -257,99 +181,15 @@ pub fn num(value: isize) -> Box<dyn Node> {
 }
 
 pub fn var(expr: &str, min: isize, max: isize) -> Box<dyn Node> {
-    create_node(Var::new(expr, min, max).as_ref())
+    Var::new(expr, min, max)
 }
 
-pub fn factorize(_nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
-    todo!("factorize")
+pub fn sum(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
+    SumNode::new(nodes)
 }
 
-pub fn sum(nodes: &[&dyn Node]) -> Box<dyn Node> {
-    let nodes = nodes
-        .iter()
-        .filter(|x| x.min().unwrap() != 0 || x.max().unwrap() != 0)
-        .collect::<Vec<_>>();
-    match nodes.len() {
-        0 => return num(0),
-        1 => return (*nodes[0]).clone(),
-        _ => {}
-    }
-
-    let mut new_nodes: Vec<Box<dyn Node>> = vec![];
-    let mut num_node_sum = 0;
-
-    for node in nodes.iter().flat_map(|x| x.flat_components()) {
-        if node.is_num() {
-            num_node_sum += node.intval().unwrap();
-        } else {
-            new_nodes.push(node);
-        }
-    }
-
-    if !new_nodes.is_empty() {
-        let y = new_nodes
-            .iter()
-            .map(|x| {
-                if x.is_mul() {
-                    x.a().unwrap().render(true, false)
-                } else {
-                    x.render(true, false)
-                }
-            })
-            .collect::<HashSet<_>>();
-        if y.len() < new_nodes.len() {
-            new_nodes = vec![factorize(&new_nodes)];
-        }
-    }
-
-    if num_node_sum != 0 {
-        new_nodes.push(num(num_node_sum));
-    }
-
-    match new_nodes.len() {
-        0 => num(0),
-        1 => new_nodes[0].clone(),
-        _ => SumNode::new(&new_nodes),
-    }
-}
-
-pub fn ands(nodes: &[&dyn Node]) -> Box<dyn Node> {
-    //     if not nodes: return NumNode(1)
-    // if len(nodes) == 1: return nodes[0]
-    // if any(not x for x in nodes): return NumNode(0)
-
-    // # filter 1s
-    // nodes = [x for x in nodes if x.min != x.max]
-    // return create_rednode(AndNode, nodes) if len(nodes) > 1 else (nodes[0] if len(nodes) == 1 else NumNode(1))
-
-    match nodes.len() {
-        0 => return num(1),
-        1 => return (*nodes[0]).clone(),
-        _ => (),
-    }
-
-    if nodes.iter().any(|x| !x.as_bool()) {
-        return num(0);
-    }
-
-    let nodes = nodes
-        .iter()
-        .filter(|x| x.min() != x.max())
-        .map(|x| (*x).clone())
-        .collect::<Vec<_>>();
-
-    match nodes.len() {
-        1 => nodes[0].clone(),
-        _ => AndNode::new(&nodes),
-    }
-}
-
-fn create_node(node: &dyn Node) -> Box<dyn Node> {
-    if node.min() == node.max() {
-        num(node.min().unwrap())
-    } else {
-        node.clone()
-    }
+pub fn ands(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
+    AndNode::new(nodes)
 }
 
 /*------------------------------------------------------*
@@ -414,6 +254,10 @@ impl Node for Var {
     fn vars(&self) -> Vec<&dyn Node> {
         vec![self]
     }
+
+    fn simplify(&self) -> Box<dyn Node> {
+        todo!()
+    }
 }
 
 /*------------------------------------------------------*
@@ -462,6 +306,10 @@ impl Node for NumNode {
     fn vars(&self) -> Vec<&dyn Node> {
         vec![self]
     }
+
+    fn simplify(&self) -> Box<dyn Node> {
+        todo!()
+    }
 }
 
 /*------------------------------------------------------*
@@ -477,10 +325,10 @@ pub struct LtNode {
 
 impl LtNode {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(a: &dyn Node, b: &dyn Node) -> Box<dyn Node> {
+    pub fn new(a: Box<dyn Node>, b: Box<dyn Node>) -> Box<dyn Node> {
         let mut node = LtNode {
-            a: a.clone(),
-            b: b.clone(),
+            a,
+            b,
             min: 0,
             max: 0,
         };
@@ -551,17 +399,15 @@ impl Node for LtNode {
         }
     }
 
-    fn floordiv(&self, b: &dyn Node, _: Option<bool>) -> Box<dyn Node> {
-        let x = self.a.floordiv(b, None);
-        let y = self.b.floordiv(b, None);
-        x.lt(y.as_ref())
-    }
-
     fn vars(&self) -> Vec<&dyn Node> {
         let mut v: Vec<&dyn Node> = vec![];
         v.extend(self.a().unwrap().vars());
         v.extend(self.b().unwrap().vars());
         v
+    }
+
+    fn simplify(&self) -> Box<dyn Node> {
+        todo!()
     }
 }
 
@@ -578,10 +424,10 @@ pub struct MulNode {
 
 impl MulNode {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(a: &dyn Node, b: &dyn Node) -> Box<dyn Node> {
+    pub fn new(a: Box<dyn Node>, b: Box<dyn Node>) -> Box<dyn Node> {
         let mut node = MulNode {
-            a: a.clone(),
-            b: b.clone(),
+            a,
+            b,
             min: 0,
             max: 0,
         };
@@ -639,29 +485,12 @@ impl Node for MulNode {
         })
     }
 
-    fn mul(&self, b: &dyn Node) -> Box<dyn Node> {
-        self.a.mul(self.b.mul(b).as_ref())
+    fn mul(&self, b: Box<dyn Node>) -> Box<dyn Node> {
+        self.a.mul(b)
     }
 
-    fn floordiv(&self, b: &dyn Node, facatoring_allowed: Option<bool>) -> Box<dyn Node> {
-        let x = self.b.modulus(b);
-        if x.is_num() && x.intval().unwrap() == 0 {
-            return self.a.mul(self.b.floordiv(b, None).as_ref());
-        }
-
-        let x = b.modulus(self.b.as_ref());
-        if x.is_num() && x.intval().unwrap() == 0 && self.b.is_num() && self.b.intval().unwrap() > 0
-        {
-            return self
-                .a
-                .floordiv(b.floordiv(self.b.as_ref(), None).as_ref(), None);
-        }
-
-        node_floordiv(self.clone().as_ref(), b, facatoring_allowed) // if self.b % b == 0: return self.a*(self.b//b)
-    }
-
-    fn modulus(&self, _other: &dyn Node) -> Box<dyn Node> {
-        todo!("MulNode::modulus")
+    fn modulus(&self, b: Box<dyn Node>) -> Box<dyn Node> {
+        self.a.modulus(b)
     }
 
     fn get_bounds(&self) -> Option<(isize, isize)> {
@@ -672,6 +501,10 @@ impl Node for MulNode {
         } else {
             Some((self.a.max().unwrap() * b, self.a.min().unwrap() * b))
         }
+    }
+
+    fn simplify(&self) -> Box<dyn Node> {
+        todo!()
     }
 }
 
@@ -684,16 +517,18 @@ pub struct DivNode {
     b: Box<dyn Node>,
     min: isize,
     max: isize,
+    factoring_allowed: bool,
 }
 
 impl DivNode {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(a: &dyn Node, b: &dyn Node) -> Box<dyn Node> {
+    pub fn new(a: Box<dyn Node>, b: Box<dyn Node>, factoring_allowed: bool) -> Box<dyn Node> {
         let mut node = DivNode {
-            a: a.clone(),
-            b: b.clone(),
+            a,
+            b,
             min: 0,
             max: 0,
+            factoring_allowed,
         };
 
         let (min, max) = node.get_bounds().unwrap();
@@ -732,6 +567,7 @@ impl Node for DivNode {
             b: self.b.clone(),
             min: self.min,
             max: self.max,
+            factoring_allowed: self.factoring_allowed,
         })
     }
 
@@ -742,8 +578,8 @@ impl Node for DivNode {
         Some((self.a.min().unwrap() / b, self.a.max().unwrap() / b))
     }
 
-    fn floordiv(&self, b: &dyn Node, _: Option<bool>) -> Box<dyn Node> {
-        self.a.floordiv(self.b.mul(b).as_ref(), None)
+    fn simplify(&self) -> Box<dyn Node> {
+        todo!()
     }
 }
 
@@ -760,10 +596,10 @@ pub struct ModNode {
 
 impl ModNode {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(a: &dyn Node, b: &dyn Node) -> Box<dyn Node> {
-        let mut node = DivNode {
-            a: a.clone(),
-            b: b.clone(),
+    pub fn new(a: Box<dyn Node>, b: Box<dyn Node>) -> Box<dyn Node> {
+        let mut node = ModNode {
+            a,
+            b,
             min: 0,
             max: 0,
         };
@@ -822,8 +658,8 @@ impl Node for ModNode {
         }
     }
 
-    fn floordiv(&self, _b: &dyn Node, _: Option<bool>) -> Box<dyn Node> {
-        todo!("ModNode::floordiv")
+    fn simplify(&self) -> Box<dyn Node> {
+        todo!()
     }
 }
 
@@ -893,54 +729,8 @@ impl Node for SumNode {
         self.nodes.iter().map(|x| x.as_ref()).collect()
     }
 
-    fn mul(&self, b: &dyn Node) -> Box<dyn Node> {
-        let nodes = self.nodes.iter().map(|x| x.mul(b)).collect::<Vec<_>>();
-        sum(nodes
-            .iter()
-            .map(|x| x.as_ref())
-            .collect::<Vec<_>>()
-            .as_slice())
-    }
-
-    fn floordiv(&self, _b: &dyn Node, facatoring_allowed: Option<bool>) -> Box<dyn Node> {
-        let facatoring_allowed = facatoring_allowed.unwrap_or(true);
-
-        //         fully_divided: List[Node] = []
-        // rest: List[Node] = []
-        // if isinstance(b, SumNode):
-        //   nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
-        //   de_num = sum(node.b for node in b.flat_components if node.__class__ is NumNode)
-        //   if nu_num > 0 and de_num and (d:=nu_num//de_num) > 0: return NumNode(d) + (self-b*d) // b
-        // if isinstance(b, Node):
-        //   for x in self.flat_components:
-        //     if x % b == 0: fully_divided.append(x // b)
-        //     else: rest.append(x)
-        //   if (sum_fully_divided:=create_rednode(SumNode, fully_divided)) != 0: return sum_fully_divided + create_rednode(SumNode, rest) // b
-        //   return Node.__floordiv__(self, b, False)
-        // if b == 1: return self
-        // if not factoring_allowed: return Node.__floordiv__(self, b, factoring_allowed)
-        // fully_divided, rest = [], []
-        // _gcd = b
-        // divisor = 1
-        // for x in self.flat_components:
-        //   if x.__class__ in (NumNode, MulNode):
-        //     if x.b%b == 0: fully_divided.append(x//b)
-        //     else:
-        //       rest.append(x)
-        //       _gcd = gcd(_gcd, x.b)
-        //       if x.__class__ == MulNode and divisor == 1 and b%x.b == 0: divisor = x.b
-        //   else:
-        //     rest.append(x)
-        //     _gcd = 1
-        // if _gcd > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(_gcd) // (b//_gcd)
-        // if divisor > 1: return Node.sum(fully_divided) + Node.sum(rest).__floordiv__(divisor) // (b//divisor)
-        // return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
-
-        todo!("SumNode::floordiv")
-    }
-
-    fn modulus(&self, _b: &dyn Node) -> Box<dyn Node> {
-        todo!("SumNode::modulus")
+    fn simplify(&self) -> Box<dyn Node> {
+        todo!()
     }
 }
 
@@ -963,7 +753,7 @@ impl AndNode {
             max: nodes.iter().map(|x| x.max().unwrap()).max().unwrap_or(0),
         };
 
-        create_node(&node)
+        Box::new(node)
     }
 }
 
@@ -1010,15 +800,7 @@ impl Node for AndNode {
         self.nodes.iter().map(|x| x.as_ref()).collect()
     }
 
-    fn floordiv(&self, b: &dyn Node, facatoring_allowed: Option<bool>) -> Box<dyn Node> {
-        let nodes = self
-            .nodes
-            .iter()
-            .map(|x| x.floordiv(b, facatoring_allowed))
-            .collect::<Vec<_>>();
-
-        let nodes = nodes.iter().map(|x| x.as_ref()).collect::<Vec<_>>();
-
-        ands(&nodes)
+    fn simplify(&self) -> Box<dyn Node> {
+        todo!()
     }
 }
