@@ -189,7 +189,7 @@ pub fn sum(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
 }
 
 pub fn ands(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
-    AndNode::new(nodes)
+    AndNode::new(&nodes)
 }
 
 /*------------------------------------------------------*
@@ -256,7 +256,7 @@ impl Node for Var {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        todo!()
+        self.clone()
     }
 }
 
@@ -308,7 +308,7 @@ impl Node for NumNode {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        todo!()
+        self.clone()
     }
 }
 
@@ -407,7 +407,10 @@ impl Node for LtNode {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        todo!()
+        let a = self.a.simplify();
+        let b = self.b.simplify();
+
+        LtNode::new(a, b)
     }
 }
 
@@ -504,7 +507,14 @@ impl Node for MulNode {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        todo!()
+        let a = self.a.simplify();
+        let b = self.b.simplify();
+
+        if a.is_num() && b.is_num() {
+            return num(self.a.intval().unwrap() * self.b.intval().unwrap());
+        }
+
+        self.clone()
     }
 }
 
@@ -579,7 +589,7 @@ impl Node for DivNode {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        todo!()
+        self.clone()
     }
 }
 
@@ -659,7 +669,7 @@ impl Node for ModNode {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        todo!()
+        self.clone()
     }
 }
 
@@ -730,7 +740,21 @@ impl Node for SumNode {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        todo!()
+        let nodes = self.nodes.iter().map(|x| x.simplify()).collect::<Vec<_>>();
+        let (num_nodes, other_nodes): (Vec<_>, Vec<_>) = nodes.iter().partition(|x| x.is_num());
+        let num_sum = num_nodes.iter().map(|x| x.intval().unwrap()).sum::<isize>();
+
+        let mut result = vec![];
+        if num_sum != 0 {
+            result.push(num(num_sum));
+        }
+        other_nodes.iter().for_each(|x| result.push((**x).clone()));
+
+        match result.len() {
+            0 => num(0),
+            1 => result[0].clone(),
+            _ => SumNode::new(&result),
+        }
     }
 }
 
@@ -801,6 +825,6 @@ impl Node for AndNode {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        todo!()
+        self.clone()
     }
 }
