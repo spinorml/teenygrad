@@ -419,24 +419,6 @@ impl Node for LtNode {
         let a = self.a.simplify();
         let b = self.b.simplify();
 
-        let a = if a.is_sum() && b.is_num() {
-            let b_val = b.intval().unwrap();
-            let nodes = a
-                .nodes()
-                .iter()
-                .map(|x| {
-                    if x.min() >= 0 && x.max() < b_val {
-                        num(0)
-                    } else {
-                        (*x).clone()
-                    }
-                })
-                .collect::<Vec<_>>();
-            sum(&nodes).simplify()
-        } else {
-            a
-        };
-
         LtNode::new(a, b).simplify_range()
     }
 }
