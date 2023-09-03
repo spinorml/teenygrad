@@ -35,13 +35,9 @@ pub trait Node {
         None
     }
 
-    fn min(&self) -> Option<isize> {
-        None
-    }
+    fn min(&self) -> isize;
 
-    fn max(&self) -> Option<isize> {
-        None
-    }
+    fn max(&self) -> isize;
 
     fn vars(&self) -> Vec<&dyn Node> {
         let mut v: Vec<&dyn Node> = vec![];
@@ -86,7 +82,7 @@ pub trait Node {
     }
 
     fn as_bool(&self) -> bool {
-        !(self.min() == self.max() && self.min().unwrap() == 0)
+        !(self.min() == self.max() && self.min() == 0)
     }
 
     fn nodes(&self) -> Vec<&dyn Node> {
@@ -110,6 +106,16 @@ pub trait Node {
     }
 
     fn simplify(&self) -> Box<dyn Node>;
+
+    fn simplify_range(&self) -> Box<dyn Node> {
+        debug_assert!(self.min() <= self.max());
+
+        if self.min() == self.max() {
+            num(self.min())
+        } else {
+            self.clone()
+        }
+    }
 
     fn neg(&self) -> Box<dyn Node> {
         self.mul(num(-1))
@@ -189,7 +195,7 @@ pub fn sum(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
 }
 
 pub fn ands(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
-    AndNode::new(&nodes)
+    AndNode::new(nodes)
 }
 
 /*------------------------------------------------------*
@@ -223,12 +229,12 @@ impl Node for Var {
         Some(&self.expr)
     }
 
-    fn min(&self) -> Option<isize> {
-        Some(self.min)
+    fn min(&self) -> isize {
+        self.min
     }
 
-    fn max(&self) -> Option<isize> {
-        Some(self.max)
+    fn max(&self) -> isize {
+        self.max
     }
 
     fn is_var(&self) -> bool {
@@ -256,7 +262,7 @@ impl Node for Var {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        self.clone()
+        self.simplify_range()
     }
 }
 
@@ -275,12 +281,12 @@ impl NumNode {
 }
 
 impl Node for NumNode {
-    fn min(&self) -> Option<isize> {
-        Some(self.value)
+    fn min(&self) -> isize {
+        self.value
     }
 
-    fn max(&self) -> Option<isize> {
-        Some(self.value)
+    fn max(&self) -> isize {
+        self.value
     }
 
     fn b(&self) -> Option<&dyn Node> {
@@ -308,7 +314,7 @@ impl Node for NumNode {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        self.clone()
+        self.simplify_range()
     }
 }
 
@@ -350,24 +356,27 @@ impl Node for LtNode {
         Some(self.b.as_ref())
     }
 
-    fn min(&self) -> Option<isize> {
-        Some(self.min)
+    fn min(&self) -> isize {
+        self.min
     }
 
-    fn max(&self) -> Option<isize> {
-        Some(self.max)
+    fn max(&self) -> isize {
+        self.max
     }
 
     fn render(&self, debug: bool, strip_parens: bool) -> String {
         let lparen = if strip_parens { "" } else { "(" };
         let rparen = if strip_parens { "" } else { ")" };
+        let debug_str = if debug {
+            format!("[{}, {}]", self.min, self.max)
+        } else {
+            "".to_string()
+        };
 
         format!(
-            "{}{}<{}{}",
-            lparen,
+            "{lparen}{}<{}{rparen}{debug_str}",
             self.a.render(debug, strip_parens),
             self.b.render(debug, strip_parens),
-            rparen
         )
     }
 
@@ -382,7 +391,7 @@ impl Node for LtNode {
 
     fn get_bounds(&self) -> Option<(isize, isize)> {
         if self.b.is_num() {
-            let (a_min, a_max) = (self.a.min().unwrap(), self.a.max().unwrap());
+            let (a_min, a_max) = (self.a.min(), self.a.max());
             let b = self.b.intval().unwrap();
 
             let x: isize = if a_max < b { 1 } else { 0 };
@@ -410,7 +419,7 @@ impl Node for LtNode {
         let a = self.a.simplify();
         let b = self.b.simplify();
 
-        LtNode::new(a, b)
+        LtNode::new(a, b).simplify_range()
     }
 }
 
@@ -452,12 +461,12 @@ impl Node for MulNode {
         Some(self.b.as_ref())
     }
 
-    fn min(&self) -> Option<isize> {
-        Some(self.min)
+    fn min(&self) -> isize {
+        self.min
     }
 
-    fn max(&self) -> Option<isize> {
-        Some(self.max)
+    fn max(&self) -> isize {
+        self.max
     }
 
     fn is_mul(&self) -> bool {
@@ -469,13 +478,16 @@ impl Node for MulNode {
         let rparen = if strip_parens { "" } else { ")" };
         let a = self.a();
         let b = self.b();
+        let debug_str = if debug {
+            format!("[{}, {}]", self.min, self.max)
+        } else {
+            "".to_string()
+        };
 
         format!(
-            "{}{}*{}{}",
-            lparen,
+            "{lparen}{}*{}{rparen}{debug_str}",
             a.unwrap().render(debug, strip_parens),
             b.unwrap().render(debug, strip_parens),
-            rparen
         )
     }
 
@@ -500,9 +512,9 @@ impl Node for MulNode {
         let b = self.b.intval().unwrap();
 
         if b >= 0 {
-            Some((self.a.min().unwrap() * b, self.a.max().unwrap() * b))
+            Some((self.a.min() * b, self.a.max() * b))
         } else {
-            Some((self.a.max().unwrap() * b, self.a.min().unwrap() * b))
+            Some((self.a.max() * b, self.a.min() * b))
         }
     }
 
@@ -510,11 +522,13 @@ impl Node for MulNode {
         let a = self.a.simplify();
         let b = self.b.simplify();
 
-        if a.is_num() && b.is_num() {
-            return num(self.a.intval().unwrap() * self.b.intval().unwrap());
-        }
+        let node = if a.is_num() && b.is_num() {
+            num(self.a.intval().unwrap() * self.b.intval().unwrap())
+        } else {
+            self.clone()
+        };
 
-        self.clone()
+        node.simplify_range()
     }
 }
 
@@ -550,12 +564,12 @@ impl DivNode {
 }
 
 impl Node for DivNode {
-    fn min(&self) -> Option<isize> {
-        Some(self.min)
+    fn min(&self) -> isize {
+        self.min
     }
 
-    fn max(&self) -> Option<isize> {
-        Some(self.max)
+    fn max(&self) -> isize {
+        self.max
     }
 
     fn render(&self, debug: bool, strip_parens: bool) -> String {
@@ -582,14 +596,14 @@ impl Node for DivNode {
     }
 
     fn get_bounds(&self) -> Option<(isize, isize)> {
-        debug_assert!(self.a.min().unwrap() >= 0);
+        debug_assert!(self.a.min() >= 0);
 
         let b = self.b.intval().unwrap();
-        Some((self.a.min().unwrap() / b, self.a.max().unwrap() / b))
+        Some((self.a.min() / b, self.a.max() / b))
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        self.clone()
+        self.simplify_range()
     }
 }
 
@@ -623,12 +637,12 @@ impl ModNode {
 }
 
 impl Node for ModNode {
-    fn min(&self) -> Option<isize> {
-        Some(self.min)
+    fn min(&self) -> isize {
+        self.min
     }
 
-    fn max(&self) -> Option<isize> {
-        Some(self.max)
+    fn max(&self) -> isize {
+        self.max
     }
 
     fn render(&self, debug: bool, strip_parens: bool) -> String {
@@ -654,11 +668,11 @@ impl Node for ModNode {
     }
 
     fn get_bounds(&self) -> Option<(isize, isize)> {
-        debug_assert!(self.a.min().unwrap() >= 0);
+        debug_assert!(self.a.min() >= 0);
         debug_assert!(self.b().unwrap().is_num());
 
         let b = self.b.intval().unwrap();
-        let (a_min, a_max) = (self.min().unwrap(), self.max().unwrap());
+        let (a_min, a_max) = (self.min(), self.max());
         let self_b_intval = self.b.intval().unwrap();
 
         if a_max - a_min >= self_b_intval || (a_min != a_max && a_min % b >= a_max % b) {
@@ -669,7 +683,7 @@ impl Node for ModNode {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        self.clone()
+        self.simplify_range()
     }
 }
 
@@ -688,8 +702,8 @@ impl SumNode {
     pub fn new(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
         let node = SumNode {
             nodes: nodes.iter().map(|x| (*x).clone()).collect(),
-            min: nodes.iter().map(|x| x.min().unwrap()).sum(),
-            max: nodes.iter().map(|x| x.max().unwrap()).sum(),
+            min: nodes.iter().map(|x| x.min()).sum(),
+            max: nodes.iter().map(|x| x.max()).sum(),
         };
 
         Box::new(node)
@@ -697,12 +711,12 @@ impl SumNode {
 }
 
 impl Node for SumNode {
-    fn min(&self) -> Option<isize> {
-        Some(self.min)
+    fn min(&self) -> isize {
+        self.min
     }
 
-    fn max(&self) -> Option<isize> {
-        Some(self.max)
+    fn max(&self) -> isize {
+        self.max
     }
 
     fn is_sum(&self) -> bool {
@@ -712,6 +726,11 @@ impl Node for SumNode {
     fn render(&self, debug: bool, strip_parens: bool) -> String {
         let lparen = if strip_parens { "" } else { "(" };
         let rparen = if strip_parens { "" } else { ")" };
+        let debug_str = if debug {
+            format!("[{}, {}]", self.min, self.max)
+        } else {
+            "".to_string()
+        };
 
         let rendered_nodes = self
             .nodes
@@ -720,11 +739,7 @@ impl Node for SumNode {
             .collect::<Vec<_>>()
             .join("+");
 
-        if strip_parens {
-            rendered_nodes
-        } else {
-            format!("{}{}{}", lparen, rendered_nodes, rparen)
-        }
+        format!("{lparen}{}{rparen}{debug_str}", rendered_nodes)
     }
 
     fn clone(&self) -> Box<dyn Node> {
@@ -752,8 +767,8 @@ impl Node for SumNode {
 
         match result.len() {
             0 => num(0),
-            1 => result[0].clone(),
-            _ => SumNode::new(&result),
+            1 => result[0].simplify_range(),
+            _ => SumNode::new(&result).simplify_range(),
         }
     }
 }
@@ -773,8 +788,8 @@ impl AndNode {
     pub fn new(nodes: &[Box<dyn Node>]) -> Box<dyn Node> {
         let node = AndNode {
             nodes: nodes.iter().map(|x| (*x).clone()).collect(),
-            min: nodes.iter().map(|x| x.min().unwrap()).min().unwrap_or(0),
-            max: nodes.iter().map(|x| x.max().unwrap()).max().unwrap_or(0),
+            min: nodes.iter().map(|x| x.min()).min().unwrap_or(0),
+            max: nodes.iter().map(|x| x.max()).max().unwrap_or(0),
         };
 
         Box::new(node)
@@ -782,12 +797,12 @@ impl AndNode {
 }
 
 impl Node for AndNode {
-    fn min(&self) -> Option<isize> {
-        Some(self.min)
+    fn min(&self) -> isize {
+        self.min
     }
 
-    fn max(&self) -> Option<isize> {
-        Some(self.max)
+    fn max(&self) -> isize {
+        self.max
     }
 
     fn is_and(&self) -> bool {
@@ -825,6 +840,6 @@ impl Node for AndNode {
     }
 
     fn simplify(&self) -> Box<dyn Node> {
-        self.clone()
+        self.simplify_range()
     }
 }
