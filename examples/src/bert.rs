@@ -20,4 +20,8 @@
  * SOFTWARE.
  */
 
-pub mod symbolic;
+struct Bert {}
+
+fn main() {
+    println!("Hello, world!");
+}

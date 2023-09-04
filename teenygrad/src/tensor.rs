@@ -20,4 +20,13 @@
  * SOFTWARE.
  */
 
-pub mod symbolic;
+#[derive(Debug, Default)]
+pub struct Tensor<T> {
+    data: Vec<T>,
+}
+
+impl<T> Tensor<T> {
+    pub fn new() -> Self {
+        Self { data: Vec::new() }
+    }
+}

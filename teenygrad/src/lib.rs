@@ -20,5 +20,6 @@
  * SOFTWARE.
  */
 
-pub mod helpers;
+pub mod nn;
 pub mod shape;
+pub mod tensor;

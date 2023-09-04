@@ -19,3 +19,12 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+
+#[derive(Default)]
+pub struct Embedding {}
+
+impl Embedding {
+    pub fn new() -> Self {
+        Embedding {}
+    }
+}

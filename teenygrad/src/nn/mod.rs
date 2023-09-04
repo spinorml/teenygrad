@@ -20,4 +20,6 @@
  * SOFTWARE.
  */
 
-pub mod symbolic;
+pub mod embedding;
+pub mod linear;
+pub mod linear_norm;

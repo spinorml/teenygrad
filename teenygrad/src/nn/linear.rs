@@ -20,4 +20,11 @@
  * SOFTWARE.
  */
 
-pub mod symbolic;
+#[derive(Default)]
+pub struct Linear {}
+
+impl Linear {
+    pub fn new() -> Self {
+        Linear {}
+    }
+}
