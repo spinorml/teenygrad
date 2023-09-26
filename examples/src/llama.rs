@@ -22,29 +22,50 @@
 
 use std::path::PathBuf;
 
-use clap::{arg, command, value_parser, Command};
+use clap::{arg, command, Parser};
 
-fn cli() -> Command {
-    command!()
-        .about("Run the LLaMA model")
-        .arg(arg!(--prompt <PROMPT> "Phrase to start with. Without this, it goes into chatbot mode"))
-        .arg(arg!(--count <COUNT> "Max number of tokens to generate").default_value("1000"))
-        .arg(arg!(--temperature <TEMPERATURE> "Temperature in the softmax").default_value("0.7"))
-        .arg(arg!(--timing <TIMING> "Print timing per token").default_value("true"))
-        .arg(arg!(--profile "Output profile data to out.prof").default_value("true"))
-        .arg(arg!(--size <SIZE> "Size of model for Gen 1 - [7B, 13B, 70B] and for Gen 2 - [7B, 13B, 34B] for Code LLaMA")
-            .default_value("7B")
-            .value_parser(["7B", "13B", "30B", "34B", "65B", "70B"])
-        )
-        .arg(arg!(--gen <GEN> "Generation of the model to use [1, 2, code]")
-            .default_value("1")
-            .value_parser(["1", "2", "code"])
-        )
-        .arg(arg!(--quantize "Quantize the weights to int8 in memory"))
-        .arg(arg!(--model <MODEL> "Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
-            .value_parser(value_parser!(PathBuf)))
+#[derive(Parser, Debug)]
+#[command(author="arshadm@spinorml.com", version, about="Run LLaMA in teenygrad", long_about=None)]
+struct Args {
+    /// Phrase to start with. Without this, it goes into chatbot mode
+    #[arg(long)]
+    prompt: Option<String>,
+
+    /// Max number of tokens to generate
+    #[arg(long, default_value = "1000")]
+    count: u32,
+
+    /// Temperature in the softmax
+    #[arg(long, default_value = "0.7")]
+    temperature: f32,
+
+    /// Print timing per token
+    #[arg(long, default_value = "false")]
+    timing: bool,
+
+    /// Output profile data to out.prof
+    #[arg(long, default_value = "false")]
+    profile: bool,
+
+    /// Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B, 70B] for Gen 2, [7B, 13B, 34B] for Code LLaMA
+    #[arg(long, default_value = "7B", value_parser = ["7B", "13B", "30B", "34B", "65B", "70B"])]
+    size: String,
+
+    /// Generation of the model to use [1, 2, code]
+    #[arg(long, default_value = "1", value_parser = ["1", "2", "code"])]
+    gen: String,
+
+    /// Quantize the weights to int8 in memory
+    #[arg(long, default_value = "false")]
+    quantize: bool,
+
+    /// Folder with the original weights to load, or single .index.json,
+    /// .safetensors or .bin file
+    #[arg(long)]
+    model: PathBuf,
 }
 
 fn main() {
-    let _ = cli().get_matches();
+    let args = Args::parse();
+    println!("Args: {:?}", args)
 }
