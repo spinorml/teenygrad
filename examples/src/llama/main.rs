@@ -20,9 +20,13 @@
  * SOFTWARE.
  */
 
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 
 use clap::{arg, command, Parser};
+
+mod personality;
+
+use personality::Personality;
 
 #[derive(Parser, Debug)]
 #[command(author="arshadm@spinorml.com", version, about="Run LLaMA in teenygrad", long_about=None)]
@@ -34,6 +38,10 @@ struct Args {
     /// Max number of tokens to generate
     #[arg(long, default_value = "1000")]
     count: u32,
+
+    /// Personality
+    #[arg(long, default_value = "William", value_parser = ["William"])]
+    personality: String,
 
     /// Temperature in the softmax
     #[arg(long, default_value = "0.7")]
@@ -67,5 +75,8 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    println!("Args: {:?}", args)
+    let chatbot = args.prompt.is_none();
+    let personality: Personality = Personality::from_str(args.personality.as_str()).unwrap();
+
+    println!("Args: {:?}, {:?}, {:?}", args, chatbot, personality)
 }
