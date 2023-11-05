@@ -1,5 +1,5 @@
 [package]
-name = "nlputil"
+name = "nlputils"
 description = "Utility functions for NLP"
 version = "0.1.0"
 edition = "2021"

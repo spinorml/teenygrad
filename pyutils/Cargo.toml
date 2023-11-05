@@ -1,7 +1,8 @@
 [package]
-name = "pyutil"
+name = "pyutils"
 description = "Utilities for interoperation with Pytorch"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+serde-pickle = { workspace = true }

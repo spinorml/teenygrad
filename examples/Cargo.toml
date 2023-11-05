@@ -6,6 +6,9 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
+teenygrad = { path = "../teenygrad" }
+nlputils = { path = "../nlputils" }
+pyutils = { path = "../pyutils" }
 clap = { version = "4.4.5", features = ["derive"] }
 error-chain = "0.12.4"
 itertools = "0.11.0"
