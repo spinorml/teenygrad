@@ -63,7 +63,7 @@ You like playing pirates and red indians.
 struct Model {}
 
 impl Model {
-    pub fn load(model_path: PathBuf, gen: String, size: String, quantize: bool) -> Self {
+    pub fn load(_model_path: PathBuf, _gen: &str, _size: &str, _quantize: bool) -> Self {
         Model {}
     }
 }
@@ -71,12 +71,12 @@ impl Model {
 struct Tokenizer {}
 
 impl Tokenizer {
-    pub fn load(tokenizer_path: PathBuf) -> Self {
+    pub fn load(_tokenizer_path: PathBuf) -> Self {
         Tokenizer {}
     }
 }
 
-struct LLaMa {
+struct Llama {
     model: Model,
     tokenizer: Tokenizer,
     gen: String,
@@ -84,22 +84,22 @@ struct LLaMa {
     quantize: bool,
 }
 
-impl LLaMa {
+impl Llama {
     pub fn build(
         model_path: PathBuf,
         tokenizer_path: PathBuf,
-        gen: String,
-        size: String,
+        gen: &str,
+        size: &str,
         quantize: bool,
     ) -> Self {
         let model = Model::load(model_path, gen, size, quantize);
         let tokenizer = Tokenizer::load(tokenizer_path);
 
-        LLaMA {
+        Llama {
             model,
             tokenizer,
-            gen,
-            size,
+            gen: gen.to_string(),
+            size: size.to_string(),
             quantize,
         }
     }
@@ -150,6 +150,12 @@ struct Args {
     model: Option<PathBuf>,
 }
 
+//
+// Example 1:
+// cargo run --bin llama -- --gen 1 --size "7B" --count 10 --personality "William" --temperature 0.7 --prompt "What is your name?"
+// Output:
+//
+//
 fn main() {
     let args = Args::parse();
     let _chatbot = args.prompt.is_none();
@@ -171,12 +177,12 @@ fn main() {
         model_path.parent().unwrap().join("tokenizer.model")
     };
 
-    print!("using LLaMA{}-{} model", { llama_suffix }, { args.size });
-    let _llama = LLaMa::build(
+    print!("using LLaMA{}-{} model", { llama_suffix }, { &args.size });
+    let _llama = Llama::build(
         model_path,
         tokenizer_path,
-        args.gen,
-        args.size,
+        &args.gen,
+        &args.size,
         args.quantize,
     );
 }

@@ -1,4 +1,4 @@
 
 [workspace]
-members = ["teenygrad", "examples"]
+members = ["teenygrad", "examples", "nlputil", "pyutil"]
 resolver = "2"
