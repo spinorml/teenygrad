@@ -21,7 +21,9 @@
  */
 
 use clap::{arg, command, Parser};
-use std::path::PathBuf;
+use itertools::Itertools;
+use nlputils::sentencepiece::SentencePieceProcessor;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 #[derive(Debug)]
@@ -63,96 +65,84 @@ You like playing pirates and red indians.
 struct Model {}
 
 impl Model {
-    pub fn load(_model_path: PathBuf, _gen: &str, _size: &str, _quantize: bool) -> Self {
+    pub fn load(_model_path: &Path) -> Self {
         Model {}
     }
 }
 
-struct Tokenizer {}
+struct Tokenizer {
+    sp: SentencePieceProcessor,
+}
 
 impl Tokenizer {
-    pub fn load(_tokenizer_path: PathBuf) -> Self {
-        Tokenizer {}
+    pub fn load(model_path: &Path) -> Self {
+        let tokenizer_model = model_path.join("../tokenizer.model");
+        let sp = SentencePieceProcessor::open(tokenizer_model).unwrap();
+
+        Tokenizer { sp }
+    }
+
+    pub fn bos_id(&self) -> u32 {
+        self.sp.bos_id().unwrap()
+    }
+
+    pub fn encode(&self, text: &str) -> Vec<u32> {
+        let pieces = self.sp.encode(text).unwrap();
+        pieces.iter().map(|p| p.id).collect_vec()
+    }
+
+    pub fn decode(&self, pieces: &[u32]) -> String {
+        self.sp.decode_piece_ids(pieces).unwrap()
     }
 }
 
 struct Llama {
     model: Model,
     tokenizer: Tokenizer,
-    gen: String,
-    size: String,
-    quantize: bool,
 }
 
 impl Llama {
-    pub fn build(
-        model_path: PathBuf,
-        tokenizer_path: PathBuf,
-        gen: &str,
-        size: &str,
-        quantize: bool,
-    ) -> Self {
-        let model = Model::load(model_path, gen, size, quantize);
-        let tokenizer = Tokenizer::load(tokenizer_path);
+    pub fn build(model_path: &Path) -> Self {
+        let model = Model::load(model_path);
+        let tokenizer = Tokenizer::load(model_path);
 
-        Llama {
-            model,
-            tokenizer,
-            gen: gen.to_string(),
-            size: size.to_string(),
-            quantize,
-        }
+        print!("BOS ID: {}", tokenizer.bos_id());
+        let x = tokenizer.encode("What is your name?");
+        println!("Encoded: {:?}", x);
+        println!("Decoded: {}", tokenizer.decode(&x));
+
+        Llama { model, tokenizer }
     }
 }
 
 #[derive(Parser, Debug)]
 #[command(author="arshadm@spinorml.com", version, about="Run LLaMA in teenygrad", long_about=None)]
 struct Args {
-    /// Phrase to start with. Without this, it goes into chatbot mode
-    #[arg(long)]
-    prompt: Option<String>,
+    /// Personality
+    #[arg(long, default_value = "William", value_parser = ["William"])]
+    personality: String,
 
     /// Max number of tokens to generate
     #[arg(long, default_value = "1000")]
     count: u32,
 
-    /// Personality
-    #[arg(long, default_value = "William", value_parser = ["William"])]
-    personality: String,
+    /// Phrase to start with. Without this, it goes into chatbot mode
+    #[arg(long)]
+    prompt: Option<String>,
 
     /// Temperature in the softmax
     #[arg(long, default_value = "0.7")]
     temperature: f32,
 
-    /// Print timing per token
-    #[arg(long, default_value = "false")]
-    timing: bool,
-
-    /// Output profile data to out.prof
-    #[arg(long, default_value = "false")]
-    profile: bool,
-
-    /// Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B, 70B] for Gen 2, [7B, 13B, 34B] for Code LLaMA
-    #[arg(long, default_value = "7B", value_parser = ["7B", "13B", "30B", "34B", "65B", "70B"])]
-    size: String,
-
-    /// Generation of the model to use [1, 2, code]
-    #[arg(long, default_value = "1", value_parser = ["1", "2", "code"])]
-    gen: String,
-
-    /// Quantize the weights to int8 in memory
-    #[arg(long, default_value = "false")]
-    quantize: bool,
-
     /// Folder with the original weights to load, or single .index.json,
     /// .safetensors or .bin file
     #[arg(long)]
-    model: Option<PathBuf>,
+    model: PathBuf,
 }
 
 //
 // Example 1:
-// cargo run --bin llama -- --gen 1 --size "7B" --count 10 --personality "William" --temperature 0.7 --prompt "What is your name?"
+// cargo run --bin llama -- --prompt "What is your name?" --count 10
 // Output:
 //
 //
@@ -161,28 +151,7 @@ fn main() {
     let _chatbot = args.prompt.is_none();
     let _personality: Personality = Personality::from_str(args.personality.as_str()).unwrap();
 
-    let llama_suffix = match args.gen.as_str() {
-        "1" => "",
-        "2" => "-2",
-        "code" => "-code",
-        _ => panic!("Unknown generation {}", args.gen),
-    };
-    let model_path = args
-        .model
-        .unwrap_or_else(|| PathBuf::from(format!("weights/LLaMA{}/{}", llama_suffix, args.size)));
+    assert!(args.model.is_dir());
 
-    let tokenizer_path = if model_path.is_dir() {
-        model_path.join("tokenizer.model")
-    } else {
-        model_path.parent().unwrap().join("tokenizer.model")
-    };
-
-    print!("using LLaMA{}-{} model", { llama_suffix }, { &args.size });
-    let _llama = Llama::build(
-        model_path,
-        tokenizer_path,
-        &args.gen,
-        &args.size,
-        args.quantize,
-    );
+    let _llama = Llama::build(&args.model);
 }
