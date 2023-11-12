@@ -1,6 +1,6 @@
 
 [workspace]
-members = ["teenygrad", "examples", "nlputils", "pyutils"]
+members = ["teenygrad", "examples", "nlputils", "torch"]
 resolver = "2"
 
 [workspace.dependencies]

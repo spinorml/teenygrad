@@ -21,10 +21,9 @@
  */
 
 use clap::{arg, command, Parser};
-use glob::{glob, glob_with, MatchOptions};
+use glob::glob;
 use itertools::Itertools;
 use nlputils::sentencepiece::SentencePieceProcessor;
-use pyutils::torch::load;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -77,7 +76,7 @@ impl Model {
         for checkpoint in checkpoints {
             match checkpoint {
                 Ok(path) => {
-                    let state = load(&path).unwrap();
+                    let state = torch::model::load(&path).unwrap();
                     println!("State: {:?}", state);
                 }
                 Err(e) => panic!("Error loading checkpoint: {}", e),

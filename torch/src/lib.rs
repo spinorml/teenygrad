@@ -20,25 +20,4 @@
  * SOFTWARE.
  */
 
-use std::{fs::File, path::Path};
-
-pub fn load(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    let file = File::open(path)?;
-    let mut zip = zip::ZipArchive::new(file)?;
-    for i in 0..zip.len() {
-        let file = zip.by_index(i)?;
-        println!("Filename: {}", file.name());
-    }
-    todo!("Implement load")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_load() {
-        let path = Path::new("/raid5/data/llama/llama-2-7b-chat/consolidated.00.pth");
-        let _ = load(path);
-    }
-}
+pub mod model;

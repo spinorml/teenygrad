@@ -20,4 +20,35 @@
  * SOFTWARE.
  */
 
-pub mod torch;
+use std::{fs::File, path::Path};
+
+use serde_pickle_rs::{DeOptions, Value};
+
+pub fn load(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let file = File::open(path)?;
+    let mut zip = zip::ZipArchive::new(file)?;
+    for i in 0..zip.len() {
+        let file = zip.by_index(i)?;
+        println!("File: {}", file.name());
+        if file.name().ends_with(".pkl") {
+            println!("Found pkl file");
+            let result: Value = serde_pickle_rs::from_reader(
+                file,
+                DeOptions::default().replace_unresolved_globals(),
+            )?;
+            println!("Value {:?}", result)
+        }
+    }
+    todo!("Implement load")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load() {
+        let path = Path::new("/raid5/data/llama/llama-2-7b-chat/consolidated.00.pth");
+        let _ = load(path).unwrap();
+    }
+}

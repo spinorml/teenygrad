@@ -1,8 +1,9 @@
 [package]
-name = "pyutils"
+name = "torch"
 description = "Utilities for interoperation with Pytorch"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 zip = "0.6.6"
+serde-pickle-rs = "1.0.2"
