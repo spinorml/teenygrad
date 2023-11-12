@@ -21,8 +21,10 @@
  */
 
 use clap::{arg, command, Parser};
+use glob::{glob, glob_with, MatchOptions};
 use itertools::Itertools;
 use nlputils::sentencepiece::SentencePieceProcessor;
+use pyutils::torch::load;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -65,7 +67,23 @@ You like playing pirates and red indians.
 struct Model {}
 
 impl Model {
-    pub fn load(_model_path: &Path) -> Self {
+    pub fn load(model_path: &Path) -> Self {
+        let checkpoints = glob(&format!(
+            "{}/consolidated.*.pth",
+            model_path.to_str().unwrap()
+        ))
+        .unwrap();
+
+        for checkpoint in checkpoints {
+            match checkpoint {
+                Ok(path) => {
+                    let state = load(&path).unwrap();
+                    println!("State: {:?}", state);
+                }
+                Err(e) => panic!("Error loading checkpoint: {}", e),
+            }
+        }
+
         Model {}
     }
 }
@@ -142,7 +160,7 @@ struct Args {
 
 //
 // Example 1:
-// cargo run --bin llama -- --prompt "What is your name?" --count 10
+// cargo run --bin llama -- --prompt "What is your name?" --count 10 --model /raid5/data/llama/llama-2-7b-chat
 // Output:
 //
 //
